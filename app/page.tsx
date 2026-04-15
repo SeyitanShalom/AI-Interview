@@ -1,10 +1,17 @@
-import Image from "next/image";
+import CTA from "./components/landing/CTA";
+import ForWho from "./components/landing/ForWho";
+import Hero from "./components/landing/Hero";
+import HowItWorks from "./components/landing/HowItWorks";
+import Navbar from "./components/landing/Navbar";
 
 export default function Home() {
   return (
-    <div>
-      <h1>AI Interview</h1>
-      <p>Welcome to AI Interview</p>
-    </div>
+    <>
+      <Navbar />
+      <Hero />
+      <ForWho />
+      <HowItWorks />
+      <CTA />
+    </>
   );
 }
