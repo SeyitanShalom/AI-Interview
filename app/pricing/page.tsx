@@ -2,7 +2,7 @@
 import { motion } from "framer-motion";
 import { Button } from "@/app/components/ui/button";
 import { Check, Sparkles, Building2, User } from "lucide-react";
-import Navbar from "@/app/components/landing/Navbar";
+// import Navbar from "@/app/components/landing/Navbar";
 import Footer from "@/app/components/landing/Footer";
 
 const candidatePlans = [
@@ -143,7 +143,7 @@ const PlanCard = ({ plan, index }: PlanCardProps) => (
 const Pricing = () => {
   return (
     <div className="min-h-screen bg-background">
-      <Navbar />
+      {/* <Navbar /> */}
 
       {/* Hero */}
       <section className="relative pt-32 pb-16 overflow-hidden">

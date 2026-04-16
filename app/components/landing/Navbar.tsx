@@ -8,7 +8,7 @@ const Navbar = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
-    <nav className="fixed top-5 left-20 right-20 z-50 border-b border-border/40 bg-primary/20 backdrop-blur-2xl rounded-2xl">
+    <nav className="fixed top-2 left-0 right-0 md:left-10 md:right-10 z-50 border-b border-border/40 bg-primary/10 backdrop-blur-2xl rounded-2xl">
       <div className="container mx-auto px-6 h-16 flex items-center justify-between">
         <a href="/" className="flex items-center gap-2.5 group">
           <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center ">
@@ -19,28 +19,28 @@ const Navbar = () => {
           </span>
         </a>
 
-        <div className="hidden md:flex items-center gap-8 text-sm font-medium text-foreground">
+        <div className="hidden md:flex items-center gap-8 font-medium text-foreground">
           <a
             href="/"
-            className="hover:scale-110 transition-all duration-200 text-base"
+            className="text-sm lg:text-base hover:scale-110 transition-all duration-200"
           >
             Home
           </a>
           <a
             href="/candidates"
-            className="hover:scale-110 transition-all duration-200 text-base"
+            className="text-sm lg:text-base hover:scale-110 transition-all duration-200"
           >
             For Candidates
           </a>
           <a
             href="/companies"
-            className="hover:scale-110 transition-all duration-200 text-base"
+            className="text-sm lg:text-base hover:scale-110 transition-all duration-200"
           >
             For Companies
           </a>
           <a
             href="/pricing"
-            className="hover:scale-110 transition-all duration-200 text-base"
+            className="text-sm lg:text-base hover:scale-110 transition-all duration-200"
           >
             Pricing
           </a>
@@ -51,7 +51,7 @@ const Navbar = () => {
             <Button
               variant="ghost"
               size="sm"
-              className="text-foreground hover:text-foreground font-medium text-base"
+              className="text-foreground hover:text-foreground font-medium text-sm lg:text-base"
             >
               Log In
             </Button>
@@ -59,7 +59,7 @@ const Navbar = () => {
           <a href="/company/auth">
             <Button
               size="sm"
-              className="font-semibold bg-primary hover:opacity-90 transition-opacity text-base"
+              className="font-semibold bg-primary hover:opacity-90 transition-opacity text-sm lg:text-base"
             >
               For Companies
             </Button>
@@ -90,20 +90,26 @@ const Navbar = () => {
           >
             <div className="container mx-auto px-6 py-6 flex flex-col gap-4">
               <a
+                href="/"
+                className="text-sm sm:text-base font-medium text-muted-foreground hover:text-foreground py-2"
+              >
+                Home
+              </a>
+              <a
                 href="/candidates"
-                className="text-sm font-medium text-primary hover:text-foreground py-2"
+                className="text-sm sm:text-base font-medium text-muted-foreground hover:text-foreground py-2"
               >
                 For Candidates
               </a>
               <a
                 href="/companies"
-                className="text-sm font-medium text-muted-foreground hover:text-foreground py-2"
+                className="text-sm sm:text-base font-medium text-muted-foreground hover:text-foreground py-2"
               >
                 For Companies
               </a>
               <a
                 href="/pricing"
-                className="text-sm font-medium text-muted-foreground hover:text-foreground py-2"
+                className="text-sm sm:text-base font-medium text-muted-foreground hover:text-foreground py-2"
               >
                 Pricing
               </a>

@@ -126,9 +126,8 @@ body {
 
   --gradient-primary: linear-gradient(
     180deg,
-    /* hsl(176, 100%, 41%), */
-    hsl(170, 100%, 11%),
-    hsl(176, 100%, 41%)
+    /* hsl(176, 100%, 41%), */ hsl(176, 100%, 19%),
+    hsl(176, 100%, 50%)
   );
   --gradient-hero: linear-gradient(
     180deg,

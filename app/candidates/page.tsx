@@ -11,7 +11,7 @@ import {
   Clock,
   Shield,
 } from "lucide-react";
-import Navbar from "@/app/components/landing/Navbar";
+// import Navbar from "@/app/components/landing/Navbar";
 import Footer from "@/app/components/landing/Footer";
 
 const features = [
@@ -73,7 +73,7 @@ const steps = [
 const ForCandidates = () => {
   return (
     <div className="min-h-screen bg-background">
-      <Navbar />
+      {/* <Navbar /> */}
 
       {/* Hero */}
       <section className="relative pt-32 pb-20 overflow-hidden">
