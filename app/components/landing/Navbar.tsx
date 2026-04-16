@@ -21,6 +21,12 @@ const Navbar = () => {
 
         <div className="hidden md:flex items-center gap-8 text-sm font-medium text-foreground">
           <a
+            href="/"
+            className="hover:scale-110 transition-all duration-200 text-base"
+          >
+            Home
+          </a>
+          <a
             href="/candidates"
             className="hover:scale-110 transition-all duration-200 text-base"
           >

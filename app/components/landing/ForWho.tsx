@@ -147,7 +147,7 @@ const ForWho = () => {
             whileInView={{ opacity: 1, x: 0 }}
             viewport={{ once: true }}
             transition={{ duration: 0.5 }}
-            className="rounded-2xl glass-card p-8"
+            className="rounded-2xl glass-card p-8 "
           >
             <div className="flex items-center gap-3 mb-6">
               <div className="w-12 h-12 rounded-xl bg-linear-to-br from-primary/30 to-primary/5 flex items-center justify-center">

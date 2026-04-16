@@ -1,4 +1,5 @@
 import CTA from "./components/landing/CTA";
+import Footer from "./components/landing/Footer";
 import ForWho from "./components/landing/ForWho";
 import Hero from "./components/landing/Hero";
 import HowItWorks from "./components/landing/HowItWorks";
@@ -12,6 +13,7 @@ export default function Home() {
       <ForWho />
       <HowItWorks />
       <CTA />
+      <Footer />
     </>
   );
 }

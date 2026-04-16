@@ -89,10 +89,10 @@ body {
   --popover: hsl(222 44% 8%);
   --popover-foreground: hsl(210 40% 96%);
 
-  --primary: hsl(170, 100%, 30%);
+  --primary: hsl(176, 100%, 41%);
   --primary-foreground: hsl(222 47% 6%);
 
-  --primary-glow: hsl(170, 100%, 30%);
+  --primary-glow: hsl(176, 100%, 41%);
 
   --secondary: hsl(222 30% 14%);
   --secondary-foreground: hsl(210 40% 90%);
@@ -100,7 +100,7 @@ body {
   --muted: hsl(222 30% 12%);
   --muted-foreground: hsl(215 20% 55%);
 
-  --accent: hsl(170, 100%, 30%);
+  --accent: hsl(176, 100%, 41%);
   --accent-foreground: hsl(222 47% 6%);
 
   --destructive: hsl(0 84% 60%);
@@ -108,7 +108,7 @@ body {
 
   --border: hsl(222 30% 15%);
   --input: hsl(222 30% 15%);
-  --ring: hsl(170, 100%, 30%);
+  --ring: hsl(176, 100%, 41%);
 
   --radius: 0.75rem;
   --text-small: 1rem;
@@ -117,18 +117,18 @@ body {
 
   --sidebar-background: hsl(222 44% 6%);
   --sidebar-foreground: hsl(210 40% 90%);
-  --sidebar-primary: hsl(170, 100%, 30%);
+  --sidebar-primary: hsl(176, 100%, 41%);
   --sidebar-primary-foreground: hsl(222 47% 6%);
   --sidebar-accent: hsl(222 30% 12%);
   --sidebar-accent-foreground: hsl(210 40% 90%);
   --sidebar-border: hsl(222 30% 15%);
-  --sidebar-ring: hsl(170, 100%, 30%);
+  --sidebar-ring: hsl(176, 100%, 41%);
 
   --gradient-primary: linear-gradient(
     180deg,
-    /* hsl(170, 100%, 30%), */
+    /* hsl(176, 100%, 41%), */
     hsl(170, 100%, 11%),
-    hsl(170, 100%, 50%)
+    hsl(176, 100%, 41%)
   );
   --gradient-hero: linear-gradient(
     180deg,
@@ -196,7 +196,7 @@ body {
   }
 
   .glass-card {
-    @apply bg-card/60 backdrop-blur-xl border border-border/60;
+    @apply bg-card/60 backdrop-blur-xl border border-border/60 hover:border-primary/30 hover:bg-card/80 transition-all duration-300;
   }
 
   .glow-border {
