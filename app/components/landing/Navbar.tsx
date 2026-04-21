@@ -1,11 +1,28 @@
 "use client";
+
 import { Button } from "@/app/components/ui/button";
 import { Video, Menu, X } from "lucide-react";
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useRouter, usePathname } from "next/navigation";
+import { useAuth } from "@/lib/auth";
 
 const Navbar = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { signOut } = useAuth();
+  const router = useRouter();
+  const pathname = usePathname();
+
+  const isDashboard =
+    pathname?.startsWith("/candidate/dashboard") ||
+    pathname?.startsWith("/company/dashboard");
+
+  const handleSignOut = async () => {
+    await signOut();
+    setMobileOpen(false);
+    router.replace("/");
+    router.refresh();
+  };
 
   return (
     <nav className="fixed top-2 left-0 right-0 md:left-10 md:right-10 z-50 border-b border-border/40 bg-primary/10 backdrop-blur-2xl rounded-2xl">
@@ -22,51 +39,63 @@ const Navbar = () => {
         <div className="hidden md:flex items-center gap-8 font-medium text-foreground">
           <a
             href="/"
-            className="text-sm lg:text-base hover:scale-110 transition-all duration-200"
+            className="text-sm hover:scale-110 transition-all duration-200"
           >
             Home
           </a>
           <a
             href="/candidates"
-            className="text-sm lg:text-base hover:scale-110 transition-all duration-200"
+            className="text-sm hover:scale-110 transition-all duration-200"
           >
             For Candidates
           </a>
           <a
             href="/companies"
-            className="text-sm lg:text-base hover:scale-110 transition-all duration-200"
+            className="text-sm hover:scale-110 transition-all duration-200"
           >
             For Companies
           </a>
           <a
             href="/pricing"
-            className="text-sm lg:text-base hover:scale-110 transition-all duration-200"
+            className="text-sm hover:scale-110 transition-all duration-200"
           >
             Pricing
           </a>
         </div>
 
         <div className="hidden md:flex items-center gap-3">
-          <a href="/candidate/auth">
+          {isDashboard ? (
             <Button
+              onClick={handleSignOut}
               variant="ghost"
               size="sm"
-              className="text-foreground hover:text-foreground font-medium text-sm lg:text-base"
+              className="text-foreground hover:text-foreground font-medium text-sm"
             >
-              Log In
+              Sign Out
             </Button>
-          </a>
-          <a href="/company/auth">
-            <Button
-              size="sm"
-              className="font-semibold bg-primary hover:opacity-90 transition-opacity text-sm lg:text-base"
-            >
-              For Companies
-            </Button>
-          </a>
+          ) : (
+            <>
+              <a href="/candidate/auth">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-foreground hover:text-foreground font-medium text-sm"
+                >
+                  Log In
+                </Button>
+              </a>
+              <a href="/company/auth">
+                <Button
+                  size="lg"
+                  className="font-semibold bg-primary hover:opacity-80 transition-opacity text-sm"
+                >
+                  For Companies
+                </Button>
+              </a>
+            </>
+          )}
         </div>
 
-        {/* Mobile menu button */}
         <button
           className="md:hidden text-foreground"
           onClick={() => setMobileOpen(!mobileOpen)}
@@ -79,7 +108,6 @@ const Navbar = () => {
         </button>
       </div>
 
-      {/* Mobile menu */}
       <AnimatePresence>
         {mobileOpen && (
           <motion.div
@@ -113,20 +141,29 @@ const Navbar = () => {
               >
                 Pricing
               </a>
+
               <div className="flex gap-3 pt-2">
-                <a href="/candidate/auth">
-                  <Button variant="outline" size="sm">
-                    Log In
+                {isDashboard ? (
+                  <Button onClick={handleSignOut} variant="outline" size="sm">
+                    Sign Out
                   </Button>
-                </a>
-                <a href="/company/auth">
-                  <Button
-                    size="sm"
-                    className="bg-primary hover:opacity-90 transition-opacity"
-                  >
-                    For Companies
-                  </Button>
-                </a>
+                ) : (
+                  <>
+                    <a href="/candidate/auth">
+                      <Button variant="outline" size="sm">
+                        Log In
+                      </Button>
+                    </a>
+                    <a href="/company/auth">
+                      <Button
+                        size="sm"
+                        className="bg-primary hover:opacity-90 transition-opacity"
+                      >
+                        For Companies
+                      </Button>
+                    </a>
+                  </>
+                )}
               </div>
             </div>
           </motion.div>

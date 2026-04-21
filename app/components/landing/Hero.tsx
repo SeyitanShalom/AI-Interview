@@ -10,11 +10,11 @@ const Hero = () => {
       {/* Layered background effects */}
       <div className="absolute inset-0 bg-(--gradient-hero)" />
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,hsl(160_84%_39%/0.2)_0%,transparent_70%)]" />
-      {/* <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-200 h-125 rounded-full bg-primary/5 blur-[150px] animate-pulse-glow" /> */}
+      <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-200 h-125 rounded-full bg-primary/10 blur-[150px] animate-pulse-glow" />
       {/* <div className="absolute bottom-0 left-0 right-0 h-px bg-linear-to-r from-transparent via-primary/20 to-transparent" /> */}
 
       {/* Dot grid pattern */}
-      <div className="absolute inset-0 bg-[radial-gradient(hsl(160_84%_39%/0.1)_1px,transparent_1px)] bg-size-[32px_32px] `mask-[radial-gradient(ellipse_at_center,black_20%,transparent_60%)]` `mask-[radial-gradient(ellipse_at_center,black_20%,transparent_60%)]`" />
+      <div className="absolute inset-0 bg-[radial-gradient(hsl(160_84%_39%/0.15)_1px,transparent_1px)] bg-size-[22px_22px]" />
 
       <div className="relative z-10 container mx-auto px-6 text-center ">
         {/* Badge */}
@@ -66,16 +66,16 @@ const Hero = () => {
               size="lg"
               className="text-base px-8 py-6 font-semibold  bg-primary hover:opacity-90 transition-all  "
             >
-              <Video className="w-5 h-5 mr-1 translate-y-[1px]" />
+              <Video className="w-5 h-5 mr-1 translate-y-px" />
               Start Practicing Free
-              <ArrowRight className="w-4 h-4 ml-1 transition-transform group-hover:translate-x-1 translate-y-[1px]" />
+              <ArrowRight className="w-4 h-4 ml-1 transition-transform group-hover:translate-x-1 translate-y-px" />
             </Button>
           </a>
           <a href="/company/auth">
             <Button
               variant="outline"
               size="lg"
-              className="text-base px-8 py-6 font-semibold border-border/60 hover:bg-secondary/60 hover:border-border transition-all translate-y-[1px]"
+              className="text-base px-8 py-6 font-semibold border-border/60 hover:bg-secondary/60 hover:border-border transition-all translate-y-px"
             >
               <Play className="w-4 h-4 mr-1" />
               For Companies

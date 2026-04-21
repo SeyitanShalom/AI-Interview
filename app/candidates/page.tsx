@@ -125,7 +125,7 @@ const ForCandidates = () => {
             <a href="/candidate/auth">
               <Button
                 size="lg"
-                className="group text-base px-8 py-6 font-semibold shadow-[var(--shadow-glow)]"
+                className="group text-base px-8 py-6 font-semibold shadow-(--shadow-glow)"
               >
                 Get Started Free
                 <ArrowRight className="w-4 h-4 ml-2 transition-transform group-hover:translate-x-1" />
