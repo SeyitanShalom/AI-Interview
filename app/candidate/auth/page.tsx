@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/app/components/ui/button";
 import { Input } from "@/app/components/ui/input";
@@ -27,7 +27,13 @@ const CandidateAuth = () => {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get("redirect");
+  const emailRedirectTo = useMemo(() => {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
 
+    return `${window.location.origin}/auth/callback?next=/candidate/dashboard`;
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -84,6 +90,7 @@ const CandidateAuth = () => {
           password: password,
           options: {
             data: { role: "candidate" }, // This matches the trigger above!
+            emailRedirectTo,
           },
         });
         if (error) throw error;
