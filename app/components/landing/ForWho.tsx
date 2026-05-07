@@ -73,13 +73,13 @@ const FeatureCard = ({
     whileInView={{ opacity: 1, y: 0 }}
     viewport={{ once: true }}
     transition={{ delay: index * 0.08, duration: 0.4 }}
-    className="flex items-center gap-4 p-4 rounded-xl hover:bg-primary/5 transition-all duration-300 group"
+    className="flex items-center gap-4 p-4 transition-all duration-300 rounded-xl hover:bg-primary/5 group"
   >
-    <div className="shrink-0 w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center group-hover:bg-primary/15 transition-colors">
+    <div className="flex items-center justify-center w-10 h-10 transition-colors rounded-lg shrink-0 bg-primary/10 group-hover:bg-primary/15">
       <Icon className="w-5 h-5 text-primary" />
     </div>
     <div>
-      <h4 className=" font-semibold text-foreground text-base">
+      <h4 className="text-base font-semibold text-foreground">
         {title}
       </h4>
       <p className="text-sm text-muted-foreground mt-0.5 leading-relaxed">
@@ -91,45 +91,45 @@ const FeatureCard = ({
 
 const ForWho = () => {
   return (
-    <section className="py-28 relative">
+    <section className="relative py-28">
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,hsl(160_84%_39%/0.04)_0%,transparent_50%)]" />
-      <div className="container mx-auto px-6 relative z-10">
+      <div className="container relative z-10 px-6 mx-auto">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
-          className="text-center mb-16"
+          className="mb-16 text-center"
         >
-          <span className="text-xs font-semibold tracking-widest uppercase text-primary/80 mb-3 block">
+          <span className="block mb-3 text-xs font-semibold tracking-widest uppercase text-primary">
             Who It's For
           </span>
-          <h2 className="font-display text-4xl md:text-5xl font-bold mb-4">
+          <h2 className="mb-4 text-4xl font-display md:text-5xl">
             Built for <span className="text-gradient-primary">Everyone</span>
           </h2>
-          <p className="text-muted-foreground text-lg max-w-xl mx-auto">
+          <p className="max-w-xl mx-auto md:text-lg text-muted-foreground">
             Whether you're preparing for your dream job or hiring the best
             talent.
           </p>
         </motion.div>
 
-        <div className="grid md:grid-cols-2 gap-6 max-w-5xl mx-auto">
+        <div className="grid max-w-5xl gap-6 mx-auto md:grid-cols-2">
           {/* Candidates */}
           <motion.div
             initial={{ opacity: 0, x: -20 }}
             whileInView={{ opacity: 1, x: 0 }}
             viewport={{ once: true }}
             transition={{ duration: 0.5 }}
-            className="rounded-2xl glass-card p-8"
+            className="p-8 rounded-2xl glass-card"
           >
             <div className="flex items-center gap-3 mb-6">
-              <div className="w-12 h-12 rounded-xl bg-linear-to-br from-primary/30 to-primary/5 flex items-center justify-center">
+              <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-linear-to-br from-primary/30 to-primary/5">
                 <UserCheck className="w-6 h-6 text-primary" />
               </div>
               <div>
-                <h3 className="font-display text-xl font-bold">
+                <h3 className="text-xl font-bold font-display">
                   For Candidates
                 </h3>
-                <p className="text-xs text-muted-foreground font-medium">
+                <p className="text-xs font-medium text-muted-foreground">
                   Practice & improve
                 </p>
               </div>
@@ -147,17 +147,17 @@ const ForWho = () => {
             whileInView={{ opacity: 1, x: 0 }}
             viewport={{ once: true }}
             transition={{ duration: 0.5 }}
-            className="rounded-2xl glass-card p-8 "
+            className="p-8 rounded-2xl glass-card "
           >
             <div className="flex items-center gap-3 mb-6">
-              <div className="w-12 h-12 rounded-xl bg-linear-to-br from-primary/30 to-primary/5 flex items-center justify-center">
+              <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-linear-to-br from-primary/30 to-primary/5">
                 <Building2 className="w-6 h-6 text-primary" />
               </div>
               <div>
-                <h3 className="font-display text-xl font-bold">
+                <h3 className="text-xl font-bold font-display">
                   For Companies
                 </h3>
-                <p className="text-xs text-muted-foreground font-medium">
+                <p className="text-xs font-medium text-muted-foreground">
                   Hire smarter
                 </p>
               </div>

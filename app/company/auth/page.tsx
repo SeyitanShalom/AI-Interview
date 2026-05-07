@@ -280,23 +280,23 @@ const CompanyAuth = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center px-4">
+    <div className="flex items-center justify-center min-h-screen px-4 bg-background">
       <div className="absolute inset-0 bg-(--gradient-hero)" />
-      <div className="absolute top-6 left-6 z-10">
+      <div className="absolute z-10 top-24 left-4">
         <Button
           variant="ghost"
           size="sm"
           onClick={() => router.push("/")}
-          className="text-muted-foreground hover:text-foreground gap-2"
+          className="gap-2 text-muted-foreground hover:text-foreground"
         >
           <ArrowLeft className="w-4 h-4" /> Back
         </Button>
       </div>
 
-      <Card className="w-full max-w-md relative z-10 bg-card/80 backdrop-blur-xl border-border/50">
-        <CardHeader className="text-center space-y-4">
+      <Card className="relative z-10 w-full max-w-md bg-card/80 backdrop-blur-xl border-border/50">
+        <CardHeader className="space-y-4 text-center">
           <div className="flex items-center justify-center gap-2">
-            <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
+            <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-primary">
               <Building2 className="w-5 h-5 text-primary-foreground" />
             </div>
           </div>
@@ -319,7 +319,7 @@ const CompanyAuth = () => {
 
         <CardContent>
           {/* Mode selector tabs */}
-          <div className="flex rounded-lg bg-secondary/50 p-1 mb-6">
+          <div className="flex p-1 mb-6 rounded-lg bg-secondary/50">
             {(["login", "signup", "join"] as CompanyMode[]).map((m) => (
               <button
                 key={m}
@@ -343,30 +343,30 @@ const CompanyAuth = () => {
             <form onSubmit={handleLogin} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>
-                <div className="relative">
-                  <Mail className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" />
+                <div className="relative border rounded-lg border-border/50">
+                  <Mail className="absolute w-4 h-4 left-3 top-2 text-muted-foreground" />
                   <Input
                     id="email"
                     type="email"
                     placeholder="you@company.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    className="pl-10"
+                    className="pl-10 text-sm md:text-base "
                     required
                   />
                 </div>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="password">Password</Label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" />
+                <div className="relative border rounded-lg border-border/50">
+                  <Lock className="absolute w-4 h-4 left-3 top-2 text-muted-foreground" />
                   <Input
                     id="password"
                     type="password"
                     placeholder="••••••••"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="pl-10"
+                    className="pl-10 text-sm md:text-base"
                     required
                     minLength={6}
                   />
@@ -374,7 +374,7 @@ const CompanyAuth = () => {
               </div>
               <Button
                 type="submit"
-                className="w-full font-semibold"
+                className="w-full font-semibold "
                 disabled={loading}
               >
                 {loading ? "Please wait..." : "Sign In"}
@@ -386,58 +386,58 @@ const CompanyAuth = () => {
             <form onSubmit={handleSignup} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="fullName">Your Name</Label>
-                <div className="relative">
-                  <User className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" />
+                <div className="relative border rounded-lg border-border/50">
+                  <User className="absolute w-4 h-4 left-3 top-2 text-muted-foreground" />
                   <Input
                     id="fullName"
                     placeholder="Jane Smith"
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
-                    className="pl-10"
+                    className="pl-10 text-sm md:text-base"
                     required
                   />
                 </div>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="companyName">Company Name</Label>
-                <div className="relative">
-                  <Building2 className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" />
+                <div className="relative border rounded-lg border-border/50">
+                  <Building2 className="absolute w-4 h-4 left-3 top-2 text-muted-foreground" />
                   <Input
                     id="companyName"
                     placeholder="Acme Inc."
                     value={companyName}
                     onChange={(e) => setCompanyName(e.target.value)}
-                    className="pl-10"
+                    className="pl-10 text-sm md:text-base"
                     required
                   />
                 </div>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>
-                <div className="relative">
-                  <Mail className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" />
+                <div className="relative border rounded-lg border-border/50">
+                  <Mail className="absolute w-4 h-4 left-3 top-2 text-muted-foreground" />
                   <Input
                     id="email"
                     type="email"
                     placeholder="you@company.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    className="pl-10"
+                    className="pl-10 text-sm md:text-base"
                     required
                   />
                 </div>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="password">Password</Label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" />
+                <div className="relative border rounded-lg border-border/50">
+                  <Lock className="absolute w-4 h-4 left-3 top-3 text-muted-foreground" />
                   <Input
                     id="password"
                     type="password"
                     placeholder="••••••••"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="pl-10"
+                    className="pl-10 text-sm md:text-base"
                     required
                     minLength={6}
                   />
@@ -457,14 +457,14 @@ const CompanyAuth = () => {
             <form onSubmit={handleJoin} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="inviteCode">Invite Code</Label>
-                <div className="relative">
-                  <KeyRound className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" />
+                <div className="relative border rounded-lg border-border/50">
+                  <KeyRound className="absolute w-4 h-4 left-3 top-2 text-muted-foreground" />
                   <Input
                     id="inviteCode"
                     placeholder="Enter company invite code"
                     value={inviteCode}
                     onChange={(e) => setInviteCode(e.target.value)}
-                    className="pl-10 font-mono tracking-wider"
+                    className="pl-10 font-mono text-sm tracking-wider md:text-base"
                     required
                   />
                 </div>
@@ -474,44 +474,44 @@ const CompanyAuth = () => {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="fullName">Your Name</Label>
-                <div className="relative">
-                  <User className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" />
+                <div className="relative border rounded-lg border-border/50">
+                  <User className="absolute w-4 h-4 left-3 top-2 text-muted-foreground" />
                   <Input
                     id="fullName"
                     placeholder="John Doe"
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
-                    className="pl-10"
+                    className="pl-10 text-sm md:text-base "
                     required
                   />
                 </div>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>
-                <div className="relative">
-                  <Mail className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" />
+                <div className="relative border rounded-lg border-border/50">
+                  <Mail className="absolute w-4 h-4 left-3 top-2 text-muted-foreground" />
                   <Input
                     id="email"
                     type="email"
                     placeholder="you@company.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    className="pl-10"
+                    className="pl-10 text-sm md:text-base "
                     required
                   />
                 </div>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="password">Password</Label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" />
+                <div className="relative border rounded-lg border-border/50">
+                  <Lock className="absolute w-4 h-4 left-3 top-2 text-muted-foreground" />
                   <Input
                     id="password"
                     type="password"
                     placeholder="••••••••"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="pl-10"
+                    className="pl-10 text-sm md:text-base "
                     required
                     minLength={6}
                   />
@@ -530,7 +530,7 @@ const CompanyAuth = () => {
           <div className="mt-4 text-center">
             <button
               onClick={() => router.push("/candidate/auth")}
-              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+              className="text-xs transition-colors text-muted-foreground hover:text-foreground"
             >
               Are you a candidate? Login here →
             </button>

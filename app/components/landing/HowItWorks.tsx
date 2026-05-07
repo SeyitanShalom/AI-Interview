@@ -26,22 +26,22 @@ const steps = [
 
 const HowItWorks = () => {
   return (
-    <section className="py-28 relative">
+    <section className="relative py-28">
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom,hsl(160_84%_39%/0.06)_0%,transparent_55%)]" />
-      <div className="container mx-auto px-6 relative z-10">
+      <div className="container relative z-10 px-6 mx-auto">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
-          className="text-center mb-16"
+          className="mb-16 text-center"
         >
-          <span className="text-xs font-semibold tracking-widest uppercase text-primary/80 mb-3 block">
+          <span className="block mb-3 text-xs font-semibold tracking-widest uppercase text-primary">
             Simple Process
           </span>
-          <h2 className="font-display text-4xl md:text-5xl font-bold mb-4">
+          <h2 className="mb-4 text-4xl font-display md:text-5xl">
             How It <span className="text-gradient-primary">Works</span>
           </h2>
-          <p className="text-muted-foreground text-lg max-w-xl mx-auto">
+          <p className="max-w-xl mx-auto md:text-lg text-muted-foreground">
             From setup to success in four simple steps.
           </p>
         </motion.div>
@@ -54,21 +54,21 @@ const HowItWorks = () => {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
               transition={{ delay: i * 0.12, duration: 0.5 }}
-              className="group flex items-center gap-3 py-8 border-b border-border/40 last:border-0 hover:border-primary/20 transition-colors"
+              className="flex items-center gap-3 py-8 transition-colors border-b group border-border/40 last:border-0 hover:border-primary/20"
             >
-              {/* <div className="shrink-0 w-14 h-14 rounded-2xl bg-primary/5 glow-border flex items-center justify-center group-hover:bg-primary/10 transition-colors">
-                <span className="font-display text-lg font-extrabold text-primary">
+              {/* <div className="flex items-center justify-center transition-colors shrink-0 w-14 h-14 rounded-2xl bg-primary/5 glow-border group-hover:bg-primary/10">
+                <span className="text-lg font-extrabold font-display text-primary">
                   {step.number}
                 </span>
               </div> */}
-              <h1 className="text-primary/20 group-hover:text-primary text-6xl font-medium transition-colors duration-300">
+              <h1 className="text-6xl font-medium transition-colors duration-300 text-primary/20 group-hover:text-primary">
                 {step.number}
               </h1>
               <div className="">
-                <h3 className="font-display text-lg font-bold mb-1 group-hover:text-primary transition-colors duration-300">
+                <h3 className="mb-1 text-lg font-bold transition-colors duration-300 font-display group-hover:text-primary">
                   {step.title}
                 </h3>
-                <p className="text-muted-foreground leading-relaxed text-sm">
+                <p className="text-sm leading-relaxed text-muted-foreground">
                   {step.desc}
                 </p>
               </div>

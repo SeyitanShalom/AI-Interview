@@ -1,9 +1,11 @@
+// "use client"
 import type { Metadata } from "next";
 import { Roboto as RobotoFont } from "next/font/google";
 import "./globals.css";
 import Navbar from "./components/landing/Navbar";
 import { Toaster } from "./components/ui/sonner";
-import { AuthProvider } from "@/lib/auth";
+import {Providers} from "./Providers";
+import {ThemeToggle} from "./components/ui/ThemeToggle";
 
 const roboto = RobotoFont({
   variable: "--font-roboto",
@@ -21,13 +23,18 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${roboto.variable} h-full antialiased`}>
+    <html
+      lang="en"
+      className={`${roboto.variable} h-full antialiased`}
+      suppressHydrationWarning
+    >
       <body className="min-h-full flex flex-col">
-        <AuthProvider>
-          <Navbar />
-          {children}
-          <Toaster />
-        </AuthProvider>
+          <Providers>
+            <Navbar />
+            {children}
+            <ThemeToggle/>
+            <Toaster />
+          </Providers>
       </body>
     </html>
   );

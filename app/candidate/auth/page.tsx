@@ -123,23 +123,23 @@ const CandidateAuth = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center px-4">
+    <div className="flex items-center justify-center min-h-screen px-4 bg-background">
       <div className="absolute inset-0 bg-(--gradient-hero)" />
-      <div className="absolute top-6 left-6 z-10">
+      <div className="absolute z-10 top-24 left-4">
         <Button
           variant="ghost"
           size="sm"
           onClick={() => router.push("/")}
-          className="text-muted-foreground hover:text-foreground gap-2"
+          className="gap-2 text-muted-foreground hover:text-foreground"
         >
           <ArrowLeft className="w-4 h-4" /> Back
         </Button>
       </div>
 
-      <Card className="w-full max-w-md relative z-10 bg-card/80 backdrop-blur-xl border-border/50">
-        <CardHeader className="text-center space-y-4">
+      <Card className="relative z-10 w-full max-w-md bg-card/80 backdrop-blur-xl border-border/50">
+        <CardHeader className="space-y-4 text-center">
           <div className="flex items-center justify-center gap-2">
-            <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
+            <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-primary">
               <Video className="w-5 h-5 text-primary-foreground" />
             </div>
           </div>
@@ -173,7 +173,7 @@ const CandidateAuth = () => {
               <div className="space-y-2">
                 <Label htmlFor="fullName">Full Name</Label>
                 <div className="relative">
-                  <User className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" />
+                  <User className="absolute w-4 h-4 left-3 top-3 text-muted-foreground" />
                   <Input
                     id="fullName"
                     placeholder="John Doe"
@@ -189,14 +189,14 @@ const CandidateAuth = () => {
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <div className="relative">
-                <Mail className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" />
+                <Mail className="absolute w-4 h-4 left-3 top-2 text-muted-foreground" />
                 <Input
                   id="email"
                   type="email"
                   placeholder="you@example.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="pl-10"
+                  className="pl-10 text-sm md:text-base "
                   required
                 />
               </div>
@@ -205,14 +205,14 @@ const CandidateAuth = () => {
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
               <div className="relative">
-                <Lock className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" />
+                <Lock className="absolute w-4 h-4 left-3 top-2 text-muted-foreground" />
                 <Input
                   id="password"
                   type="password"
                   placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="pl-10"
+                  className="pl-10 text-sm md:text-base"
                   required
                   minLength={6}
                 />
@@ -221,7 +221,7 @@ const CandidateAuth = () => {
 
             <Button
               type="submit"
-              className="w-full font-semibold"
+              className="w-full text-sm font-semibold md:text-base bg-primary hover:opacity-90"
               disabled={loading}
             >
               {loading
@@ -232,11 +232,11 @@ const CandidateAuth = () => {
             </Button>
           </form>
 
-          <div className="mt-6 text-center text-sm text-muted-foreground">
+          <div className="mt-6 text-sm text-center text-muted-foreground">
             {isLogin ? "Don't have an account?" : "Already have an account?"}{" "}
             <button
               onClick={() => setIsLogin(!isLogin)}
-              className="text-primary hover:underline font-medium"
+              className="font-medium text-primary hover:underline"
             >
               {isLogin ? "Sign up" : "Sign in"}
             </button>
@@ -245,7 +245,7 @@ const CandidateAuth = () => {
           <div className="mt-4 text-center">
             <button
               onClick={() => router.push("/companies")}
-              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+              className="text-xs transition-colors text-muted-foreground hover:text-foreground"
             >
               Are you a company? Login here →
             </button>

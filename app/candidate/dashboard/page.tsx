@@ -535,7 +535,7 @@ const CandidateDashboard = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background relative overflow-hidden">
+    <div className="relative min-h-screen overflow-hidden bg-background">
       {/* Ambient background */}
       <div className="fixed inset-0 pointer-events-none">
         <div className="absolute top-0 right-1/4 w-[500px] h-[500px] bg-primary/[0.03] rounded-full blur-[120px]" />
@@ -543,18 +543,18 @@ const CandidateDashboard = () => {
       </div>
 
       {/* Navbar */}
-      {/* <nav className="border-b border-border/50 bg-card/30 backdrop-blur-xl sticky top-0 z-50">
-        <div className="container mx-auto px-6 h-16 flex items-center justify-between">
+      {/* <nav className="sticky top-0 z-50 border-b border-border/50 bg-card/30 backdrop-blur-xl">
+        <div className="container flex items-center justify-between h-16 px-6 mx-auto">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary to-primary-glow flex items-center justify-center shadow-[0_0_20px_-4px_hsl(var(--primary)/0.4)]">
               <Video className="w-4 h-4 text-primary-foreground" />
             </div>
-            <span className="font-display text-lg font-bold tracking-tight">
+            <span className="text-lg font-bold tracking-tight font-display">
               InterviewAI
             </span>
           </div>
           <div className="flex items-center gap-4">
-            <span className="text-sm text-muted-foreground hidden sm:inline">
+            <span className="hidden text-sm text-muted-foreground sm:inline">
               {user?.email}
             </span>
             <Button
@@ -569,7 +569,7 @@ const CandidateDashboard = () => {
         </div>
       </nav> */}
 
-      <div className="container mx-auto px-6 py-8 max-w-5xl relative z-10 mt-28">
+      <div className="container relative z-10 max-w-5xl px-6 py-8 mx-auto mt-28">
         {/* Past session feedback view */}
         {selectedSession?.ai_feedback && (
           <motion.div
@@ -584,18 +584,18 @@ const CandidateDashboard = () => {
             >
               ← Back to Dashboard
             </Button>
-            <h2 className="text-xl font-display font-bold mb-1">
+            <h2 className="mb-1 text-xl font-bold font-display">
               {selectedSession.job_role} Interview
             </h2>
-            <p className="text-sm text-muted-foreground mb-6">
+            <p className="mb-6 text-sm text-muted-foreground">
               "{selectedSession.question}"
             </p>
             {selectedSession.video_url && (
-              <div className="mb-6 rounded-2xl overflow-hidden aspect-video bg-black ring-1 ring-border/30">
+              <div className="mb-6 overflow-hidden bg-black rounded-2xl aspect-video ring-1 ring-border/30">
                 <video
                   src={selectedSession.video_url}
                   controls
-                  className="w-full h-full object-cover"
+                  className="object-cover w-full h-full"
                 />
               </div>
             )}
@@ -613,14 +613,14 @@ const CandidateDashboard = () => {
               className="flex items-center justify-between mb-6"
             >
               <div>
-                <h1 className="text-2xl font-display font-bold tracking-tight">
+                <h1 className="text-xl font-bold tracking-tight md:text-2xl font-display">
                   Practice Interview
                 </h1>
-                <p className="text-sm text-muted-foreground">
+                <p className="text-xs md:text-sm text-muted-foreground">
                   AI-powered mock interviews with real-time feedback
                 </p>
               </div>
-              <TabsList className="bg-secondary/30 backdrop-blur-sm border border-border/30 p-1">
+              <TabsList className="p-1 border bg-secondary/30 backdrop-blur-sm border-border/30">
                 <TabsTrigger
                   value="practice"
                   className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_0_16px_-4px_hsl(var(--primary)/0.4)] transition-all"
@@ -645,8 +645,8 @@ const CandidateDashboard = () => {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -20 }}
                   >
-                    <Card className="glass-card glow-border max-w-lg mx-auto">
-                      <CardHeader className="text-center pb-4">
+                    <Card className="max-w-lg mx-auto glass-card glow-border">
+                      <CardHeader className="pb-4 text-center">
                         <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center mx-auto mb-4 shadow-[0_0_30px_-8px_hsl(var(--primary)/0.3)]">
                           <Bot className="w-10 h-10 text-primary" />
                         </div>
@@ -660,7 +660,7 @@ const CandidateDashboard = () => {
                       </CardHeader>
                       <CardContent className="space-y-4">
                         <div>
-                          <label className="text-sm font-medium text-foreground mb-2 block">
+                          <label className="block mb-2 text-sm font-medium text-foreground">
                             Job Role
                           </label>
                           <Input
@@ -701,7 +701,7 @@ const CandidateDashboard = () => {
                     className="space-y-6"
                   >
                     <div className="flex justify-center">
-                      <span className="text-xs rounded-full border border-border/50 px-3 py-1 bg-secondary/40 text-muted-foreground">
+                      <span className="px-3 py-1 text-xs border rounded-full border-border/50 bg-secondary/40 text-muted-foreground">
                         {transcriptionMode === "browser-stt"
                           ? "Transcription: Browser STT"
                           : "Transcription: Local Whisper"}
@@ -751,7 +751,7 @@ const CandidateDashboard = () => {
                     key="analyzing"
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
-                    className="text-center py-20"
+                    className="py-20 text-center"
                   >
                     <motion.div
                       className="w-24 h-24 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center mx-auto mb-6 shadow-[0_0_40px_-8px_hsl(var(--primary)/0.3)]"
@@ -760,7 +760,7 @@ const CandidateDashboard = () => {
                     >
                       <Bot className="w-12 h-12 text-primary" />
                     </motion.div>
-                    <h2 className="text-xl font-display font-bold mb-2">
+                    <h2 className="mb-2 text-xl font-bold font-display">
                       Analyzing Your Response
                     </h2>
                     <p className="text-muted-foreground">
@@ -778,7 +778,7 @@ const CandidateDashboard = () => {
                     className="space-y-6"
                   >
                     <div className="flex items-center justify-between">
-                      <h2 className="text-xl font-display font-bold">
+                      <h2 className="text-xl font-bold font-display">
                         Your Feedback
                       </h2>
                       <Button

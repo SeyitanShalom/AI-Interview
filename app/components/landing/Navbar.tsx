@@ -25,51 +25,51 @@ const Navbar = () => {
   };
 
   return (
-    <nav className="fixed top-2 left-0 right-0 md:left-10 md:right-10 z-50 border-b border-border/40 bg-primary/10 backdrop-blur-2xl rounded-2xl">
-      <div className="container mx-auto px-6 h-16 flex items-center justify-between">
+    <nav className="fixed left-0 right-0 z-50 border-b top-2 md:left-10 md:right-10 border-border/40 dark:bg-primary/5 backdrop-blur-2xl rounded-2xl">
+      <div className="container flex items-center justify-between h-16 px-6 mx-auto">
         <a href="/" className="flex items-center gap-2.5 group">
-          <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center ">
+          <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-primary ">
             <Video className="w-4.5 h-4.5 text-primary-foreground" />
           </div>
-          <span className="font-display text-lg font-bold tracking-tight">
+          <span className="text-lg font-bold tracking-tight font-display">
             InterviewAI
           </span>
         </a>
 
-        <div className="hidden md:flex items-center gap-8 font-medium text-foreground">
+        <div className="items-center hidden gap-8 font-medium md:flex text-foreground">
           <a
             href="/"
-            className="text-sm hover:scale-110 transition-all duration-200"
+            className="text-sm transition-all duration-200 hover:scale-110"
           >
             Home
           </a>
           <a
             href="/candidates"
-            className="text-sm hover:scale-110 transition-all duration-200"
+            className="text-sm transition-all duration-200 hover:scale-110"
           >
             For Candidates
           </a>
           <a
             href="/companies"
-            className="text-sm hover:scale-110 transition-all duration-200"
+            className="text-sm transition-all duration-200 hover:scale-110"
           >
             For Companies
           </a>
-          <a
+          {/* <a
             href="/pricing"
-            className="text-sm hover:scale-110 transition-all duration-200"
+            className="text-sm transition-all duration-200 hover:scale-110"
           >
             Pricing
-          </a>
+          </a> */}
         </div>
 
-        <div className="hidden md:flex items-center gap-3">
+        <div className="items-center hidden gap-3 md:flex">
           {isDashboard ? (
             <Button
               onClick={handleSignOut}
               variant="ghost"
               size="sm"
-              className="text-foreground hover:text-foreground font-medium text-sm"
+              className="text-sm font-medium text-foreground hover:text-foreground"
             >
               Sign Out
             </Button>
@@ -79,7 +79,7 @@ const Navbar = () => {
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="text-foreground hover:text-foreground font-medium text-sm"
+                  className="text-sm font-medium text-foreground hover:text-foreground"
                 >
                   Log In
                 </Button>
@@ -87,7 +87,7 @@ const Navbar = () => {
               <a href="/company/auth">
                 <Button
                   size="lg"
-                  className="font-semibold bg-primary hover:opacity-80 transition-opacity text-sm"
+                  className="text-sm font-semibold transition-opacity bg-primary hover:opacity-80"
                 >
                   For Companies
                 </Button>
@@ -114,33 +114,33 @@ const Navbar = () => {
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: "auto" }}
             exit={{ opacity: 0, height: 0 }}
-            className="md:hidden border-t border-border/40 bg-background/95 backdrop-blur-2xl overflow-hidden"
+            className="overflow-hidden border-t md:hidden border-border/40 bg-background/95 backdrop-blur-2xl"
           >
-            <div className="container mx-auto px-6 py-6 flex flex-col gap-4">
+            <div className="container flex flex-col gap-4 px-6 py-6 mx-auto">
               <a
                 href="/"
-                className="text-sm sm:text-base font-medium text-muted-foreground hover:text-foreground py-2"
+                className="py-2 text-sm font-medium sm:text-base text-muted-foreground hover:text-foreground"
               >
                 Home
               </a>
               <a
                 href="/candidates"
-                className="text-sm sm:text-base font-medium text-muted-foreground hover:text-foreground py-2"
+                className="py-2 text-sm font-medium sm:text-base text-muted-foreground hover:text-foreground"
               >
                 For Candidates
               </a>
               <a
                 href="/companies"
-                className="text-sm sm:text-base font-medium text-muted-foreground hover:text-foreground py-2"
+                className="py-2 text-sm font-medium sm:text-base text-muted-foreground hover:text-foreground"
               >
                 For Companies
               </a>
-              <a
+              {/* <a
                 href="/pricing"
-                className="text-sm sm:text-base font-medium text-muted-foreground hover:text-foreground py-2"
+                className="py-2 text-sm font-medium sm:text-base text-muted-foreground hover:text-foreground"
               >
                 Pricing
-              </a>
+              </a> */}
 
               <div className="flex gap-3 pt-2">
                 {isDashboard ? (
@@ -157,7 +157,7 @@ const Navbar = () => {
                     <a href="/company/auth">
                       <Button
                         size="sm"
-                        className="bg-primary hover:opacity-90 transition-opacity"
+                        className="transition-opacity bg-primary hover:opacity-90"
                       >
                         For Companies
                       </Button>
