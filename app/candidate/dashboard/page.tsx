@@ -647,7 +647,7 @@ const CandidateDashboard = () => {
                   >
                     <Card className="max-w-lg mx-auto glass-card glow-border">
                       <CardHeader className="pb-4 text-center">
-                        <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center mx-auto mb-4 shadow-[0_0_30px_-8px_hsl(var(--primary)/0.3)]">
+                        <div className="w-20 h-20 rounded-2xl bg-linear-to-br from-primary/20 to-primary/5 flex items-center justify-center mx-auto mb-4 shadow-[0_0_30px_-8px_hsl(var(--primary)/0.3)]">
                           <Bot className="w-10 h-10 text-primary" />
                         </div>
                         <CardTitle className="text-xl font-display">
@@ -673,7 +673,7 @@ const CandidateDashboard = () => {
                         <Button
                           onClick={startInterview}
                           disabled={isGenerating || !jobRole.trim()}
-                          className="w-full gap-2 bg-gradient-to-r from-primary to-primary-glow hover:opacity-90 transition-opacity shadow-[0_0_20px_-4px_hsl(var(--primary)/0.4)]"
+                          className="w-full gap-2 bg-linear-to-r from-primary to-primary-glow hover:opacity-90 transition-opacity shadow-[0_0_20px_-4px_hsl(var(--primary)/0.4)]"
                           size="lg"
                         >
                           {isGenerating ? (
@@ -737,7 +737,7 @@ const CandidateDashboard = () => {
                       {recorder.recordedUrl && (
                         <Button
                           onClick={handleSubmitAnswer}
-                          className="gap-2 bg-gradient-to-r from-primary to-primary-glow hover:opacity-90 shadow-[0_0_20px_-4px_hsl(var(--primary)/0.4)]"
+                          className="gap-2 bg-linear-to-r from-primary to-primary-glow hover:opacity-90 shadow-[0_0_20px_-4px_hsl(var(--primary)/0.4)]"
                         >
                           <Send className="w-4 h-4" /> Submit for Feedback
                         </Button>
@@ -754,7 +754,7 @@ const CandidateDashboard = () => {
                     className="py-20 text-center"
                   >
                     <motion.div
-                      className="w-24 h-24 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center mx-auto mb-6 shadow-[0_0_40px_-8px_hsl(var(--primary)/0.3)]"
+                      className="w-24 h-24 rounded-2xl bg-linear-to-br from-primary/20 to-primary/5 flex items-center justify-center mx-auto mb-6 shadow-[0_0_40px_-8px_hsl(var(--primary)/0.3)]"
                       animate={{ scale: [1, 1.08, 1], rotate: [0, 3, -3, 0] }}
                       transition={{ repeat: Infinity, duration: 2.5 }}
                     >
@@ -783,7 +783,7 @@ const CandidateDashboard = () => {
                       </h2>
                       <Button
                         onClick={resetToSetup}
-                        className="gap-2 bg-gradient-to-r from-primary to-primary-glow hover:opacity-90"
+                        className="gap-2 bg-linear-to-r from-primary to-primary-glow hover:opacity-90"
                       >
                         <Play className="w-4 h-4" /> Practice Again
                       </Button>
