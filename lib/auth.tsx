@@ -36,11 +36,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const { supabase } = await import("@/lib/supabase");
       const {
         data: { subscription: sub },
-      } = supabase.auth.onAuthStateChange((_event: AuthChangeEvent, session: Session | null) => {
-        setSession(session);
-        setUser(session?.user ?? null);
-        setLoading(false);
-      });
+      } = supabase.auth.onAuthStateChange(
+        (_event: AuthChangeEvent, session: Session | null) => {
+          setSession(session);
+          setUser(session?.user ?? null);
+          setLoading(false);
+        },
+      );
       subscription = sub;
 
       supabase.auth.getSession().then(({ data: { session } }) => {
