@@ -295,8 +295,8 @@ const CompanyDashboard = () => {
         const userIds = [
           ...new Set(
             sessionsRes.data
-              .filter((s) => s.status === "completed")
-              .map((s) => s.user_id),
+              .filter((s: any) => s.status === "completed")
+              .map((s: any) => s.user_id),
           ),
         ];
         if (userIds.length > 0) {

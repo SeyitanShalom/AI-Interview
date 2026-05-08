@@ -80,7 +80,7 @@ const scoreBg = (score: number) => {
 };
 
 const CandidateReview = ({ sessions, profiles = [] }: CandidateReviewProps) => {
-  const completedSessions = sessions.filter((s) => s.status === "completed");
+  const completedSessions = sessions.filter((s: any) => s.status === "completed");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [videoDialogUrl, setVideoDialogUrl] = useState<string | null>(null);
 
