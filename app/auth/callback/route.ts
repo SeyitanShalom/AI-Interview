@@ -5,6 +5,9 @@ import { type EmailOtpType } from "@supabase/supabase-js";
 
 const DEFAULT_REDIRECT = "/";
 
+// Prevent this route from being prerendered
+export const dynamic = "force-dynamic";
+
 function safeNextPath(rawNext: string | null): string {
   if (!rawNext || !rawNext.startsWith("/")) {
     return DEFAULT_REDIRECT;
@@ -21,9 +24,21 @@ export async function GET(request: NextRequest) {
   const next = safeNextPath(url.searchParams.get("next"));
   const cookieStore = await cookies();
 
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabaseKey) {
+    return NextResponse.redirect(
+      new URL(
+        `/candidate/auth?error=${encodeURIComponent("Configuration error. Please contact support.")}`,
+        request.url
+      )
+    );
+  }
+
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    supabaseUrl,
+    supabaseKey,
     {
       cookies: {
         getAll() {
