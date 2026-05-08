@@ -1,15 +1,22 @@
 import { createBrowserClient } from "@supabase/ssr";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+let supabaseClient: ReturnType<typeof createBrowserClient> | null = null;
 
-if (!supabaseUrl || !supabaseKey) {
-  console.warn(
-    "Missing Supabase environment variables. Make sure NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY are set in your environment."
-  );
-}
+export const supabase = new Proxy({} as ReturnType<typeof createBrowserClient>, {
+  get: (target, prop) => {
+    if (!supabaseClient) {
+      const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-export const supabase = createBrowserClient(
-  supabaseUrl || "",
-  supabaseKey || ""
-);
+      if (!url || !key) {
+        throw new Error(
+          "Missing Supabase environment variables. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in your environment."
+        );
+      }
+
+      supabaseClient = createBrowserClient(url, key);
+    }
+
+    return (supabaseClient as any)[prop];
+  },
+});
