@@ -531,9 +531,34 @@ const CandidateDashboard = () => {
 
   const viewSession = (sessionId: string) => {
     const session = sessions.find((s) => s.id === sessionId);
-    if (session?.ai_feedback) {
+    if (session) {
       setSelectedSession(session);
       setActiveTab("practice");
+    }
+  };
+
+  const handleDeleteSession = async (sessionId: string) => {
+    try {
+      const { error } = await supabase
+        .from("interview_sessions")
+        .delete()
+        .eq("id", sessionId);
+
+      if (error) {
+        throw error;
+      }
+
+      setSessions(sessions.filter((s) => s.id !== sessionId));
+      if (selectedSession?.id === sessionId) {
+        setSelectedSession(null);
+      }
+      toast.success("Session deleted", {
+        description: "The interview session has been removed.",
+      });
+    } catch (error: any) {
+      toast.error("Error", {
+        description: error?.message ?? "Failed to delete session",
+      });
     }
   };
 
@@ -574,7 +599,7 @@ const CandidateDashboard = () => {
 
       <div className="container relative z-10 max-w-5xl px-6 py-8 mx-auto mt-28">
         {/* Past session feedback view */}
-        {selectedSession?.ai_feedback && (
+        {selectedSession && (
           <motion.div
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
@@ -587,12 +612,23 @@ const CandidateDashboard = () => {
             >
               ← Back to Dashboard
             </Button>
-            <h2 className="mb-1 text-xl font-bold font-display">
-              {selectedSession.job_role} Interview
-            </h2>
-            <p className="mb-6 text-sm text-muted-foreground">
-              "{selectedSession.question}"
-            </p>
+            <div className="flex items-start justify-between mb-6">
+              <div>
+                <h2 className="mb-1 text-xl font-bold font-display">
+                  {selectedSession.job_role} Interview
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  "{selectedSession.question}"
+                </p>
+              </div>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => handleDeleteSession(selectedSession.id)}
+              >
+                Delete
+              </Button>
+            </div>
             {selectedSession.video_url && (
               <div className="mb-6 overflow-hidden bg-black rounded-2xl aspect-video ring-1 ring-border/30">
                 <video
@@ -602,9 +638,20 @@ const CandidateDashboard = () => {
                 />
               </div>
             )}
-            <FeedbackDisplay
-              feedback={selectedSession.ai_feedback as unknown as Feedback}
-            />
+            {selectedSession.ai_feedback ? (
+              <FeedbackDisplay
+                feedback={selectedSession.ai_feedback as unknown as Feedback}
+              />
+            ) : (
+              <Card className="glass-card">
+                <CardContent className="py-12 text-center">
+                  <p className="text-muted-foreground">
+                    Feedback for this session is not yet available or could not
+                    be generated.
+                  </p>
+                </CardContent>
+              </Card>
+            )}
           </motion.div>
         )}
 
@@ -798,7 +845,11 @@ const CandidateDashboard = () => {
             </TabsContent>
 
             <TabsContent value="history">
-              <SessionHistory sessions={sessions} onSelect={viewSession} />
+              <SessionHistory
+                sessions={sessions}
+                onSelect={viewSession}
+                onDelete={handleDeleteSession}
+              />
             </TabsContent>
           </Tabs>
         )}

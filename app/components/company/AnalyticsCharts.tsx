@@ -1,5 +1,10 @@
 import { useMemo } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/app/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/app/components/ui/card";
 import {
   ChartContainer,
   ChartTooltip,
@@ -36,11 +41,15 @@ interface Session {
 
 interface AnalyticsChartsProps {
   sessions: Session[];
+  currentUserRole?: string | null;
 }
 
 const PIE_COLORS = ["hsl(var(--primary))", "hsl(var(--muted-foreground))"];
 
-const AnalyticsCharts = ({ sessions }: AnalyticsChartsProps) => {
+const AnalyticsCharts = ({
+  sessions,
+  currentUserRole,
+}: AnalyticsChartsProps) => {
   const stats = useMemo(() => {
     const completed = sessions.filter((s: any) => s.status === "completed");
     const pending = sessions.filter((s) => s.status === "pending");

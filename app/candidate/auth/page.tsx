@@ -2,8 +2,8 @@
 
 export const dynamic = "force-dynamic";
 
-import { useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/app/components/ui/button";
 import { Input } from "@/app/components/ui/input";
 import { Label } from "@/app/components/ui/label";
@@ -27,15 +27,19 @@ const CandidateAuth = () => {
     type: "success" | "error";
     message: string;
   } | null>(null);
+  const [redirectTo, setRedirectTo] = useState<string | null>(null);
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const redirectTo = searchParams.get("redirect");
   const emailRedirectTo = useMemo(() => {
     if (typeof window === "undefined") {
       return undefined;
     }
 
     return `${window.location.origin}/auth/callback?next=/candidate/dashboard`;
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setRedirectTo(params.get("redirect"));
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {

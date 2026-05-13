@@ -45,6 +45,7 @@ const CompanyDashboard = () => {
     name: string;
     invite_code: string;
   } | null>(null);
+  const [userRole, setUserRole] = useState<string | null>(null);
   const [members, setMembers] = useState<any[]>([]);
   const [kits, setKits] = useState<any[]>([]);
   const [sessions, setSessions] = useState<any[]>([]);
@@ -52,6 +53,7 @@ const CompanyDashboard = () => {
     { user_id: string; full_name: string }[]
   >([]);
   const [loading, setLoading] = useState(true);
+  const [initialLoad, setInitialLoad] = useState(true);
   const [accessIssue, setAccessIssue] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
@@ -66,6 +68,7 @@ const CompanyDashboard = () => {
       setSessions([]);
       setCandidateProfiles([]);
       setAccessIssue(null);
+      setUserRole(null);
       setLoading(false);
       return;
     }
@@ -90,6 +93,7 @@ const CompanyDashboard = () => {
 
       if (memberRows && memberRows.length > 0) {
         companyId = memberRows[0].company_id;
+        setUserRole(memberRows[0].role ?? null);
       } else {
         const { data: ownedCompanies, error: ownedError } = await supabase
           .from("companies")
@@ -104,6 +108,8 @@ const CompanyDashboard = () => {
 
         if (ownedCompanies && ownedCompanies.length > 0) {
           companyId = ownedCompanies[0].id;
+          // If user is the creator, they should be admin
+          setUserRole("admin");
         }
       }
 
@@ -216,6 +222,7 @@ const CompanyDashboard = () => {
               }
             }
 
+            setUserRole("admin");
             companyId = createdCompanyId;
           }
         }
@@ -288,6 +295,10 @@ const CompanyDashboard = () => {
       }
 
       if (membersRes.data) setMembers(membersRes.data);
+      if (membersRes.data) {
+        const me = membersRes.data.find((m: any) => m.user_id === user.id);
+        if (me) setUserRole(me.role ?? userRole);
+      }
       if (kitsRes.data) setKits(kitsRes.data);
       if (sessionsRes.data) {
         setSessions(sessionsRes.data);
@@ -321,8 +332,10 @@ const CompanyDashboard = () => {
       setSessions([]);
       setCandidateProfiles([]);
       setAccessIssue(getReadableError(error));
+      setUserRole(null);
     } finally {
       setLoading(false);
+      setInitialLoad(false);
     }
   }, [user, authLoading]);
 
@@ -335,11 +348,11 @@ const CompanyDashboard = () => {
     router.push("/");
   };
 
-  if (loading) {
+  if (initialLoad) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
+      <div className="flex items-center justify-center min-h-screen bg-background">
         <div className="relative">
-          <div className="w-12 h-12 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+          <div className="w-12 h-12 border-2 rounded-full border-primary/30 border-t-primary animate-spin" />
           <div className="absolute inset-0 w-12 h-12 rounded-full animate-pulse-glow bg-primary/10" />
         </div>
       </div>
@@ -347,7 +360,7 @@ const CompanyDashboard = () => {
   }
 
   return (
-    <div className="min-h-screen bg-background relative overflow-hidden">
+    <div className="relative min-h-screen overflow-hidden bg-background">
       {/* Ambient background glow */}
       <div className="fixed inset-0 pointer-events-none">
         <div className="absolute top-0 left-1/4 w-150 h-150 bg-primary/3 rounded-full blur-[120px]" />
@@ -355,23 +368,23 @@ const CompanyDashboard = () => {
       </div>
 
       {/* Navbar
-      <nav className="border-b border-border/50 bg-card/30 backdrop-blur-xl sticky top-0 z-50">
-        <div className="container mx-auto px-6 h-16 flex items-center justify-between">
+      <nav className="sticky top-0 z-50 border-b border-border/50 bg-card/30 backdrop-blur-xl">
+        <div className="container flex items-center justify-between h-16 px-6 mx-auto">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary to-primary-glow flex items-center justify-center shadow-[0_0_20px_-4px_hsl(var(--primary)/0.4)]">
               <Building2 className="w-4 h-4 text-primary-foreground" />
             </div>
-            <span className="font-display text-lg font-bold tracking-tight">
+            <span className="text-lg font-bold tracking-tight font-display">
               InterviewAI
             </span>
             {company && (
-              <span className="text-sm text-muted-foreground ml-1 hidden sm:inline">
+              <span className="hidden ml-1 text-sm text-muted-foreground sm:inline">
                 · {company.name}
               </span>
             )}
           </div>
           <div className="flex items-center gap-4">
-            <span className="text-sm text-muted-foreground hidden sm:inline">
+            <span className="hidden text-sm text-muted-foreground sm:inline">
               {user?.email}
             </span>
             <Button
@@ -386,34 +399,44 @@ const CompanyDashboard = () => {
         </div>
       </nav> */}
 
-      <div className="container mx-auto px-6 py-8 relative mt-20 z-10">
+      <div className="container relative z-10 px-6 py-8 mx-auto mt-20">
         <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4 }}
         >
-          <h1 className="text-3xl font-display font-bold mb-1 tracking-tight">
+          <h1 className="mb-1 text-3xl font-bold tracking-tight font-display">
             Company Dashboard
           </h1>
-          <p className="text-muted-foreground mb-8">
+          <p className="mb-2 text-muted-foreground">
             Manage your team, interview kits, and candidate reviews.
           </p>
+          {company && (
+            <div className="flex items-center gap-3 mb-8">
+              <span className="text-sm text-muted-foreground">
+                {company.name}
+              </span>
+              <span className="px-2 py-1 text-xs rounded-full bg-secondary text-secondary-foreground">
+                Role: {userRole ?? "—"}
+              </span>
+            </div>
+          )}
         </motion.div>
 
         {!company ? (
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="text-center py-16"
+            className="py-16 text-center"
           >
-            <div className="w-20 h-20 rounded-2xl bg-secondary/50 flex items-center justify-center mx-auto mb-5">
+            <div className="flex items-center justify-center w-20 h-20 mx-auto mb-5 rounded-2xl bg-secondary/50">
               <Building2 className="w-10 h-10 text-muted-foreground" />
             </div>
-            <p className="text-muted-foreground mb-4">
+            <p className="mb-4 text-muted-foreground">
               No company found for this account.
             </p>
             {accessIssue && (
-              <p className="text-xs text-destructive/90 max-w-xl mx-auto mb-4">
+              <p className="max-w-xl mx-auto mb-4 text-xs text-destructive/90">
                 Could not load company data: {accessIssue}
               </p>
             )}
@@ -431,29 +454,29 @@ const CompanyDashboard = () => {
             </div>
           </motion.div>
         ) : (
-          <Tabs defaultValue="team" className="space-y-6">
-            <TabsList className="bg-secondary/30 backdrop-blur-sm border border-border/30 p-1">
+          <Tabs defaultValue="team" className="space-y-6 ">
+            <TabsList className="border bg-secondary/10 dark:bg-secondary/30 backdrop-blur-sm border-border/30">
               <TabsTrigger
                 value="team"
-                className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_0_16px_-4px_hsl(var(--primary)/0.4)] transition-all"
+                className="gap-1 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_0_16px_-4px_hsl(var(--primary)/0.4)] transition-all"
               >
                 <KeyRound className="w-4 h-4" /> Team & Invite
               </TabsTrigger>
               <TabsTrigger
                 value="kits"
-                className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_0_16px_-4px_hsl(var(--primary)/0.4)] transition-all"
+                className="gap-1 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_0_16px_-4px_hsl(var(--primary)/0.4)] transition-all"
               >
                 <FileText className="w-4 h-4" /> Interview Kits
               </TabsTrigger>
               <TabsTrigger
                 value="review"
-                className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_0_16px_-4px_hsl(var(--primary)/0.4)] transition-all"
+                className="gap-1 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_0_16px_-4px_hsl(var(--primary)/0.4)] transition-all"
               >
                 <Video className="w-4 h-4" /> Candidate Review
               </TabsTrigger>
               <TabsTrigger
                 value="analytics"
-                className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_0_16px_-4px_hsl(var(--primary)/0.4)] transition-all"
+                className="gap-1 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_0_16px_-4px_hsl(var(--primary)/0.4)] transition-all"
               >
                 <BarChart3 className="w-4 h-4" /> Analytics
               </TabsTrigger>
@@ -465,30 +488,64 @@ const CompanyDashboard = () => {
               transition={{ delay: 0.1 }}
             >
               <TabsContent value="team">
-                <InviteCodeManager
-                  company={company}
-                  members={members}
-                  onRefresh={fetchData}
-                />
+                {loading ? (
+                  <div className="space-y-6">
+                    <div className="h-40 rounded-xl bg-secondary/30 animate-pulse" />
+                    <div className="h-28 rounded-xl bg-secondary/20 animate-pulse" />
+                  </div>
+                ) : (
+                  <InviteCodeManager
+                    company={company}
+                    members={members}
+                    onRefresh={fetchData}
+                    currentUserRole={userRole}
+                  />
+                )}
               </TabsContent>
 
               <TabsContent value="kits">
-                <InterviewKitBuilder
-                  companyId={company.id}
-                  kits={kits}
-                  onRefresh={fetchData}
-                />
+                {loading ? (
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <div className="h-28 rounded-xl bg-secondary/20 animate-pulse" />
+                    <div className="h-28 rounded-xl bg-secondary/20 animate-pulse" />
+                    <div className="h-28 rounded-xl bg-secondary/20 animate-pulse" />
+                    <div className="h-28 rounded-xl bg-secondary/20 animate-pulse" />
+                  </div>
+                ) : (
+                  <InterviewKitBuilder
+                    companyId={company.id}
+                    kits={kits}
+                    onRefresh={fetchData}
+                    currentUserRole={userRole}
+                  />
+                )}
               </TabsContent>
 
               <TabsContent value="review">
-                <CandidateReview
-                  sessions={sessions}
-                  profiles={candidateProfiles}
-                />
+                {loading ? (
+                  <div className="space-y-3">
+                    <div className="h-20 rounded-xl bg-secondary/20 animate-pulse" />
+                    <div className="h-20 rounded-xl bg-secondary/20 animate-pulse" />
+                    <div className="h-20 rounded-xl bg-secondary/20 animate-pulse" />
+                  </div>
+                ) : (
+                  <CandidateReview
+                    sessions={sessions}
+                    profiles={candidateProfiles}
+                    currentUserRole={userRole}
+                  />
+                )}
               </TabsContent>
 
               <TabsContent value="analytics">
-                <AnalyticsCharts sessions={sessions} />
+                {loading ? (
+                  <div className="h-64 rounded-xl bg-secondary/20 animate-pulse" />
+                ) : (
+                  <AnalyticsCharts
+                    sessions={sessions}
+                    currentUserRole={userRole}
+                  />
+                )}
               </TabsContent>
             </motion.div>
           </Tabs>

@@ -31,27 +31,23 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(
       new URL(
         `/candidate/auth?error=${encodeURIComponent("Configuration error. Please contact support.")}`,
-        request.url
-      )
+        request.url,
+      ),
     );
   }
 
-  const supabase = createServerClient(
-    supabaseUrl,
-    supabaseKey,
-    {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll();
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => {
-            cookieStore.set(name, value, options);
-          });
-        },
+  const supabase = createServerClient(supabaseUrl, supabaseKey, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
+      },
+      setAll(cookiesToSet) {
+        cookiesToSet.forEach(({ name, value, options }) => {
+          cookieStore.set(name, value, options);
+        });
       },
     },
-  );
+  });
 
   let errorMessage: string | null = null;
 

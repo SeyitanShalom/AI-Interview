@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Card,
   CardContent,
@@ -9,6 +9,7 @@ import {
 import { Badge } from "@/app/components/ui/badge";
 import { Progress } from "@/app/components/ui/progress";
 import { Button } from "@/app/components/ui/button";
+import { Input } from "@/app/components/ui/input";
 import {
   Video,
   Clock,
@@ -48,13 +49,15 @@ interface Session {
   question: string;
   status: string;
   overall_score: number | null;
-  content_score: number | null;
-  style_score: number | null;
+  content_score?: number | null;
+  style_score?: number | null;
   video_url: string | null;
-  completed_at: string | null;
+  completed_at?: string | null;
   created_at: string;
   ai_feedback: Feedback | null;
-  interview_kit_id: string | null;
+  interview_kit_id?: string | null;
+  company_id?: string;
+  updated_at?: string;
 }
 
 interface CandidateProfile {
@@ -65,7 +68,10 @@ interface CandidateProfile {
 interface CandidateReviewProps {
   sessions: Session[];
   profiles?: CandidateProfile[];
+  currentUserRole?: string | null;
 }
+
+type SessionStatusFilter = "all" | "completed" | "pending";
 
 const scoreColor = (score: number) => {
   if (score >= 80) return "text-primary";
@@ -79,10 +85,59 @@ const scoreBg = (score: number) => {
   return "bg-destructive/10 border-destructive/20";
 };
 
-const CandidateReview = ({ sessions, profiles = [] }: CandidateReviewProps) => {
-  const completedSessions = sessions.filter((s: any) => s.status === "completed");
+const CandidateReview = ({
+  sessions,
+  profiles = [],
+  currentUserRole,
+}: CandidateReviewProps) => {
+  const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] =
+    useState<SessionStatusFilter>("completed");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [videoDialogUrl, setVideoDialogUrl] = useState<string | null>(null);
+
+  const filteredSessions = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+
+    return sessions.filter((session) => {
+      const matchesStatus =
+        statusFilter === "all" || session.status === statusFilter;
+
+      if (!matchesStatus) return false;
+
+      if (!term) return true;
+
+      const candidateName = profiles.find(
+        (profile) => profile.user_id === session.user_id,
+      )?.full_name;
+
+      const haystack = [
+        candidateName,
+        session.user_id,
+        session.job_role,
+        session.question,
+        session.status,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      return haystack.includes(term);
+    });
+  }, [profiles, searchTerm, sessions, statusFilter]);
+
+  const completedSessions = filteredSessions.filter(
+    (s) => s.status === "completed",
+  );
+
+  const sessionCounts = useMemo(
+    () => ({
+      all: sessions.length,
+      completed: sessions.filter((s) => s.status === "completed").length,
+      pending: sessions.filter((s) => s.status === "pending").length,
+    }),
+    [sessions],
+  );
 
   const getProfileName = (userId: string) => {
     const profile = profiles.find((p) => p.user_id === userId);
@@ -93,25 +148,64 @@ const CandidateReview = ({ sessions, profiles = [] }: CandidateReviewProps) => {
     return (
       <div className="space-y-6">
         <div>
-          <h2 className="text-xl font-display font-bold">
+          <h2 className="text-xl font-bold font-display">
             Candidate Recordings
           </h2>
           <p className="text-sm text-muted-foreground">
             Review AI-scored candidate interview responses
           </p>
         </div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex-1 max-w-md">
+            <Input
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search by candidate, role, or question"
+              className="bg-secondary/30 border-border/50 focus:border-primary/50"
+            />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {(["all", "completed", "pending"] as const).map((value) => (
+              <Button
+                key={value}
+                variant={statusFilter === value ? "secondary" : "ghost"}
+                size="sm"
+                onClick={() => setStatusFilter(value)}
+                className="capitalize"
+              >
+                {value} ({sessionCounts[value]})
+              </Button>
+            ))}
+          </div>
+        </div>
         <Card className="glass-card">
           <CardContent className="flex flex-col items-center justify-center py-16 text-center">
-            <div className="w-16 h-16 rounded-2xl bg-secondary/50 flex items-center justify-center mb-4">
+            <div className="flex items-center justify-center w-16 h-16 mb-4 rounded-2xl bg-secondary/50">
               <Video className="w-8 h-8 text-muted-foreground" />
             </div>
             <p className="text-muted-foreground">
-              No candidate recordings yet.
+              {searchTerm || statusFilter !== "completed"
+                ? "No sessions match your filters."
+                : "No candidate recordings yet."}
             </p>
-            <p className="text-xs text-muted-foreground mt-1">
-              Recordings will appear here when candidates complete interviews
-              linked to your company.
+            <p className="mt-1 text-xs text-muted-foreground">
+              {searchTerm || statusFilter !== "completed"
+                ? "Try a broader search or switch to a different status filter."
+                : "Recordings will appear here when candidates complete interviews linked to your company."}
             </p>
+            {(searchTerm || statusFilter !== "completed") && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setSearchTerm("");
+                  setStatusFilter("completed");
+                }}
+                className="mt-3"
+              >
+                Clear filters
+              </Button>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -121,13 +215,35 @@ const CandidateReview = ({ sessions, profiles = [] }: CandidateReviewProps) => {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-display font-bold">Candidate Recordings</h2>
+        <h2 className="text-xl font-bold font-display">Candidate Recordings</h2>
         <p className="text-sm text-muted-foreground">
           {completedSessions.length} completed interview
           {completedSessions.length !== 1 ? "s" : ""}
         </p>
       </div>
-
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex-1 max-w-md">
+          <Input
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Search by candidate, role, or question"
+            className="bg-secondary/30 border-border/50 focus:border-primary/50"
+          />
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {(["all", "completed", "pending"] as const).map((value) => (
+            <Button
+              key={value}
+              variant={statusFilter === value ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() => setStatusFilter(value)}
+              className="capitalize"
+            >
+              {value} ({sessionCounts[value]})
+            </Button>
+          ))}
+        </div>
+      </div>
       {/* Video Dialog */}
       <Dialog
         open={!!videoDialogUrl}
@@ -144,7 +260,7 @@ const CandidateReview = ({ sessions, profiles = [] }: CandidateReviewProps) => {
               src={videoDialogUrl}
               controls
               autoPlay
-              className="w-full rounded-lg bg-black aspect-video"
+              className="w-full bg-black rounded-lg aspect-video"
             />
           )}
         </DialogContent>
@@ -163,18 +279,18 @@ const CandidateReview = ({ sessions, profiles = [] }: CandidateReviewProps) => {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.04 }}
             >
-              <Card className="glass-card hover:border-primary/20 transition-colors group">
+              <Card className="transition-colors glass-card hover:border-primary/20 group">
                 <CardHeader
                   className="pb-3 cursor-pointer"
                   onClick={() => setExpandedId(isExpanded ? null : session.id)}
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex items-center gap-3">
-                      <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-secondary to-secondary/50 flex items-center justify-center border border-border/30">
+                      <div className="flex items-center justify-center border w-11 h-11 rounded-xl bg-linear-to-br from-secondary to-secondary/50 border-border/30">
                         <UserCircle className="w-5 h-5 text-muted-foreground" />
                       </div>
                       <div>
-                        <CardTitle className="font-display text-base flex items-center gap-2">
+                        <CardTitle className="flex items-center gap-2 text-base font-display">
                           {candidateName ||
                             `Candidate ${session.user_id.slice(0, 8)}`}
                           <Badge
@@ -184,20 +300,15 @@ const CandidateReview = ({ sessions, profiles = [] }: CandidateReviewProps) => {
                             {session.job_role}
                           </Badge>
                         </CardTitle>
-                        <CardDescription className="text-xs flex items-center gap-1">
+                        <CardDescription className="flex items-center gap-1 text-xs">
                           <Clock className="w-3 h-3" />
-                          {session.completed_at
-                            ? new Date(session.completed_at).toLocaleDateString(
-                                "en-US",
-                                {
-                                  month: "short",
-                                  day: "numeric",
-                                  year: "numeric",
-                                  hour: "numeric",
-                                  minute: "2-digit",
-                                },
-                              )
-                            : new Date(session.created_at).toLocaleDateString()}
+                          {new Date(
+                            session.updated_at || session.created_at,
+                          ).toLocaleDateString("en-US", {
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                          })}
                         </CardDescription>
                       </div>
                     </div>
@@ -219,7 +330,7 @@ const CandidateReview = ({ sessions, profiles = [] }: CandidateReviewProps) => {
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-8 w-8 text-muted-foreground"
+                        className="w-8 h-8 text-muted-foreground"
                       >
                         {isExpanded ? (
                           <ChevronUp className="w-4 h-4" />
@@ -231,38 +342,40 @@ const CandidateReview = ({ sessions, profiles = [] }: CandidateReviewProps) => {
                   </div>
                 </CardHeader>
 
-                <CardContent className="space-y-3 pt-0">
+                <CardContent className="pt-0 space-y-3">
                   <p className="text-sm text-muted-foreground line-clamp-2">
-                    <span className="text-foreground font-medium">Q:</span>{" "}
+                    <span className="font-medium text-foreground">Q:</span>{" "}
                     {session.question}
                   </p>
 
-                  {session.content_score != null &&
-                    session.style_score != null && (
+                  {feedback?.content_score != null &&
+                    feedback?.style_score != null && (
                       <div className="grid grid-cols-2 gap-4 pt-1">
                         <div className="space-y-1.5">
                           <div className="flex justify-between text-xs">
                             <span className="text-muted-foreground">
                               Content
                             </span>
-                            <span className={scoreColor(session.content_score)}>
-                              {session.content_score}%
+                            <span
+                              className={scoreColor(feedback.content_score)}
+                            >
+                              {feedback.content_score}%
                             </span>
                           </div>
                           <Progress
-                            value={session.content_score}
+                            value={feedback.content_score}
                             className="h-1.5"
                           />
                         </div>
                         <div className="space-y-1.5">
                           <div className="flex justify-between text-xs">
                             <span className="text-muted-foreground">Style</span>
-                            <span className={scoreColor(session.style_score)}>
-                              {session.style_score}%
+                            <span className={scoreColor(feedback.style_score)}>
+                              {feedback.style_score}%
                             </span>
                           </div>
                           <Progress
-                            value={session.style_score}
+                            value={feedback.style_score}
                             className="h-1.5"
                           />
                         </div>
@@ -309,16 +422,16 @@ const CandidateReview = ({ sessions, profiles = [] }: CandidateReviewProps) => {
                         transition={{ duration: 0.25 }}
                         className="overflow-hidden"
                       >
-                        <div className="pt-4 border-t border-border/20 space-y-4">
+                        <div className="pt-4 space-y-4 border-t border-border/20">
                           {/* Summary */}
-                          <div className="p-3 rounded-lg bg-secondary/30 border border-border/20">
+                          <div className="p-3 border rounded-lg bg-secondary/30 border-border/20">
                             <p className="text-sm text-foreground">
                               {feedback.summary}
                             </p>
                           </div>
 
                           {/* Strengths & Improvements */}
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                             <div className="space-y-2">
                               <h4 className="text-xs font-semibold text-primary flex items-center gap-1.5">
                                 <CheckCircle2 className="w-3.5 h-3.5" />{" "}
@@ -328,7 +441,7 @@ const CandidateReview = ({ sessions, profiles = [] }: CandidateReviewProps) => {
                                 {feedback.strengths?.map((s, idx) => (
                                   <li
                                     key={idx}
-                                    className="text-xs text-muted-foreground flex items-start gap-2"
+                                    className="flex items-start gap-2 text-xs text-muted-foreground"
                                   >
                                     <TrendingUp className="w-3 h-3 text-primary mt-0.5 shrink-0" />
                                     {s}
@@ -345,7 +458,7 @@ const CandidateReview = ({ sessions, profiles = [] }: CandidateReviewProps) => {
                                 {feedback.improvements?.map((s, idx) => (
                                   <li
                                     key={idx}
-                                    className="text-xs text-muted-foreground flex items-start gap-2"
+                                    className="flex items-start gap-2 text-xs text-muted-foreground"
                                   >
                                     <AlertTriangle className="w-3 h-3 text-yellow-400 mt-0.5 shrink-0" />
                                     {s}
@@ -356,8 +469,8 @@ const CandidateReview = ({ sessions, profiles = [] }: CandidateReviewProps) => {
                           </div>
 
                           {/* Detailed Analysis */}
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="p-3 rounded-lg bg-secondary/20 border border-border/10 space-y-1">
+                          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                            <div className="p-3 space-y-1 border rounded-lg bg-secondary/20 border-border/10">
                               <h4 className="text-xs font-semibold text-foreground">
                                 Content Analysis
                               </h4>
@@ -365,7 +478,7 @@ const CandidateReview = ({ sessions, profiles = [] }: CandidateReviewProps) => {
                                 {feedback.content_analysis}
                               </p>
                             </div>
-                            <div className="p-3 rounded-lg bg-secondary/20 border border-border/10 space-y-1">
+                            <div className="p-3 space-y-1 border rounded-lg bg-secondary/20 border-border/10">
                               <h4 className="text-xs font-semibold text-foreground">
                                 Style Analysis
                               </h4>

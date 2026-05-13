@@ -2,7 +2,7 @@
 
 export const dynamic = "force-dynamic";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/app/components/ui/button";
 import { Input } from "@/app/components/ui/input";
@@ -35,9 +35,17 @@ const CompanyAuth = () => {
   const [fullName, setFullName] = useState("");
   const [companyName, setCompanyName] = useState("");
   const [inviteCode, setInviteCode] = useState("");
+  const [secureToken, setSecureToken] = useState("");
+  const [secureInvite, setSecureInvite] = useState<{
+    companyId: string;
+    companyName: string | null;
+  } | null>(null);
   const [loading, setLoading] = useState(false);
   const router = useRouter();
   const { toast } = useToast();
+  const [secureInviteTokenFromQuery, setSecureInviteTokenFromQuery] = useState<
+    string | null
+  >(null);
   const emailRedirectTo = useMemo(() => {
     if (typeof window === "undefined") {
       return undefined;
@@ -45,6 +53,91 @@ const CompanyAuth = () => {
 
     return `${window.location.origin}/auth/callback?next=/company/dashboard`;
   }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setSecureInviteTokenFromQuery(params.get("secure"));
+  }, []);
+
+  useEffect(() => {
+    if (!secureInviteTokenFromQuery) {
+      return;
+    }
+
+    setMode("join");
+    setSecureToken(secureInviteTokenFromQuery);
+  }, [secureInviteTokenFromQuery]);
+
+  useEffect(() => {
+    if (!secureToken) {
+      setSecureInvite(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadSecureInvite = async () => {
+      const response = await fetch(`/api/company/invite-links/${secureToken}`);
+      const payload = (await response.json().catch(() => ({}))) as {
+        companyId?: string;
+        companyName?: string | null;
+        error?: string;
+      };
+
+      if (!response.ok || !payload.companyId) {
+        throw new Error(payload.error || "Invalid secure invite link.");
+      }
+
+      if (!cancelled) {
+        setSecureInvite({
+          companyId: payload.companyId,
+          companyName: payload.companyName ?? null,
+        });
+      }
+    };
+
+    loadSecureInvite().catch((error) => {
+      if (!cancelled) {
+        setSecureInvite(null);
+        toast({
+          title: "Secure invite unavailable",
+          description:
+            error instanceof Error
+              ? error.message
+              : "This secure invite link is no longer valid.",
+          variant: "destructive",
+        });
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [secureToken, toast]);
+
+  const redeemSecureInvite = async (token: string) => {
+    const response = await fetch(`/api/company/invite-links/${token}`, {
+      method: "POST",
+    });
+
+    const payload = (await response.json().catch(() => ({}))) as {
+      companyId?: string;
+      companyName?: string | null;
+      error?: string;
+    };
+
+    if (!response.ok || !payload.companyId) {
+      throw new Error(payload.error || "Unable to redeem secure invite.");
+    }
+
+    await supabase.auth.updateUser({
+      data: {
+        pending_secure_token: null,
+      },
+    });
+
+    return payload;
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -93,12 +186,16 @@ const CompanyAuth = () => {
       if (user) {
         const pendingCompanyId = user.user_metadata?.pending_company_id;
         const pendingCompanyName = user.user_metadata?.pending_company_name;
+        const pendingSecureToken = user.user_metadata?.pending_secure_token;
 
         const { data: existingMembership } = await supabase
           .from("company_members")
           .select("company_id")
           .eq("user_id", user.id)
           .limit(1);
+
+        let hasMembership =
+          !!existingMembership && existingMembership.length > 0;
 
         if (!existingMembership || existingMembership.length === 0) {
           if (pendingCompanyId) {
@@ -107,6 +204,7 @@ const CompanyAuth = () => {
               user_id: user.id,
               role: "member",
             });
+            hasMembership = true;
           } else if (pendingCompanyName) {
             const { data: existingCompany } = await supabase
               .from("companies")
@@ -135,7 +233,20 @@ const CompanyAuth = () => {
                 user_id: user.id,
                 role: "admin",
               });
+              hasMembership = true;
             }
+          }
+        }
+
+        if (pendingSecureToken) {
+          const redeemedInvite = await redeemSecureInvite(pendingSecureToken);
+
+          if (!hasMembership && redeemedInvite.companyId) {
+            await supabase.from("company_members").insert({
+              company_id: redeemedInvite.companyId,
+              user_id: user.id,
+              role: "member",
+            });
           }
         }
       }
@@ -225,14 +336,26 @@ const CompanyAuth = () => {
     setLoading(true);
 
     try {
-      // Verify invite code exists
-      const { data: company, error: companyError } = await supabase
-        .from("companies")
-        .select("id, name")
-        .eq("invite_code", inviteCode.trim())
-        .single();
+      let company: { id: string; name: string } | null = secureInvite
+        ? {
+            id: secureInvite.companyId,
+            name: secureInvite.companyName ?? "your company",
+          }
+        : null;
 
-      if (companyError || !company) {
+      if (!company) {
+        const { data, error } = await supabase
+          .from("companies")
+          .select("id, name")
+          .eq("invite_code", inviteCode.trim())
+          .single();
+
+        if (!error && data) {
+          company = data;
+        }
+      }
+
+      if (!company) {
         toast({
           title: "Invalid Invite Code",
           description:
@@ -244,7 +367,7 @@ const CompanyAuth = () => {
       }
 
       // Sign up the user
-      const { data, error } = await supabase.auth.signUp({
+      const signUpResult = await supabase.auth.signUp({
         email,
         password,
         options: {
@@ -252,19 +375,31 @@ const CompanyAuth = () => {
             full_name: fullName,
             role: "company",
             pending_company_id: company.id,
+            ...(secureToken ? { pending_secure_token: secureToken } : {}),
           },
           emailRedirectTo,
         },
       });
+      const { data, error } = signUpResult;
       if (error) throw error;
 
       if (data.user && data.session) {
-        // Add as company member
-        await supabase.from("company_members").insert({
-          company_id: company.id,
-          user_id: data.user.id,
-          role: "member",
-        });
+        if (secureToken) {
+          const redeemedInvite = await redeemSecureInvite(secureToken);
+
+          await supabase.from("company_members").insert({
+            company_id: redeemedInvite.companyId,
+            user_id: data.user.id,
+            role: "member",
+          });
+        } else {
+          // Add as company member
+          await supabase.from("company_members").insert({
+            company_id: company.id,
+            user_id: data.user.id,
+            role: "member",
+          });
+        }
       }
 
       toast({
@@ -322,7 +457,7 @@ const CompanyAuth = () => {
 
         <CardContent>
           {/* Mode selector tabs */}
-          <div className="flex p-1 mb-6 rounded-lg bg-secondary/50">
+          <div className="flex p-1 mb-6 rounded-lg bg-secondary/10">
             {(["login", "signup", "join"] as CompanyMode[]).map((m) => (
               <button
                 key={m}
@@ -458,23 +593,36 @@ const CompanyAuth = () => {
 
           {mode === "join" && (
             <form onSubmit={handleJoin} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="inviteCode">Invite Code</Label>
-                <div className="relative border rounded-lg border-border/50">
-                  <KeyRound className="absolute w-4 h-4 left-3 top-2 text-muted-foreground" />
-                  <Input
-                    id="inviteCode"
-                    placeholder="Enter company invite code"
-                    value={inviteCode}
-                    onChange={(e) => setInviteCode(e.target.value)}
-                    className="pl-10 font-mono text-sm tracking-wider md:text-base"
-                    required
-                  />
+              {!secureInvite && (
+                <div className="space-y-2">
+                  <Label htmlFor="inviteCode">Invite Code</Label>
+                  <div className="relative border rounded-lg border-border/50">
+                    <KeyRound className="absolute w-4 h-4 left-3 top-2 text-muted-foreground" />
+                    <Input
+                      id="inviteCode"
+                      placeholder="Enter company invite code"
+                      value={inviteCode}
+                      onChange={(e) => setInviteCode(e.target.value)}
+                      className="pl-10 font-mono text-sm tracking-wider md:text-base"
+                      required
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Ask your company admin for the invite code
+                  </p>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  Ask your company admin for the invite code
-                </p>
-              </div>
+              )}
+
+              {secureInvite && (
+                <div className="px-4 py-3 text-sm border rounded-xl border-primary/20 bg-primary/10 text-foreground">
+                  <p className="font-medium">Secure invite detected</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {secureInvite.companyName
+                      ? `You were invited to join ${secureInvite.companyName}.`
+                      : "You were invited to join a company using a short-lived secure link."}
+                  </p>
+                </div>
+              )}
               <div className="space-y-2">
                 <Label htmlFor="fullName">Your Name</Label>
                 <div className="relative border rounded-lg border-border/50">

@@ -1,6 +1,7 @@
 import { motion } from "framer-motion";
-import { Clock, TrendingUp, ChevronRight } from "lucide-react";
+import { Clock, TrendingUp, ChevronRight, Trash2 } from "lucide-react";
 import { Card, CardContent } from "@/app/components/ui/card";
+import { Button } from "@/app/components/ui/button";
 import { format } from "date-fns";
 
 interface Session {
@@ -15,9 +16,11 @@ interface Session {
 const SessionHistory = ({
   sessions,
   onSelect,
+  onDelete,
 }: {
   sessions: Session[];
   onSelect: (id: string) => void;
+  onDelete?: (id: string) => void;
 }) => {
   if (!sessions.length) {
     return (
@@ -36,12 +39,12 @@ const SessionHistory = ({
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: i * 0.04 }}
         >
-          <Card
-            className="glass-card hover:border-primary/25 cursor-pointer transition-all group"
-            onClick={() => onSelect(session.id)}
-          >
+          <Card className="glass-card hover:border-primary/25 transition-all group">
             <CardContent className="p-4 flex items-center justify-between">
-              <div className="flex-1 min-w-0">
+              <div
+                className="flex-1 min-w-0 cursor-pointer"
+                onClick={() => onSelect(session.id)}
+              >
                 <div className="flex items-center gap-2 mb-1">
                   <span className="text-xs font-medium text-primary bg-primary/10 px-2.5 py-0.5 rounded-full border border-primary/15">
                     {session.job_role}
@@ -55,7 +58,7 @@ const SessionHistory = ({
                   {session.question}
                 </p>
               </div>
-              <div className="flex items-center gap-3 ml-4">
+              <div className="flex items-center gap-2 ml-4">
                 {session.overall_score !== null && (
                   <div className="flex items-center gap-1.5">
                     <TrendingUp className="w-4 h-4 text-primary" />
@@ -69,7 +72,23 @@ const SessionHistory = ({
                     In Progress
                   </span>
                 )}
-                <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors" />
+                {onDelete && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDelete(session.id);
+                    }}
+                    className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
+                )}
+                <ChevronRight
+                  className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors cursor-pointer"
+                  onClick={() => onSelect(session.id)}
+                />
               </div>
             </CardContent>
           </Card>
