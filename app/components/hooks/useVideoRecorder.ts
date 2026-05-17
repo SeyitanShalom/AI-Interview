@@ -21,7 +21,7 @@ export const useVideoRecorder = () => {
       setStream(mediaStream);
       setError(null);
       return mediaStream;
-    } catch (e) {
+    } catch {
       setError(
         "Camera access denied. Please allow camera and microphone access.",
       );

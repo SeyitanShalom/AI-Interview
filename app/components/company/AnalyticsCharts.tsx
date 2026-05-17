@@ -46,12 +46,9 @@ interface AnalyticsChartsProps {
 
 const PIE_COLORS = ["hsl(var(--primary))", "hsl(var(--muted-foreground))"];
 
-const AnalyticsCharts = ({
-  sessions,
-  currentUserRole,
-}: AnalyticsChartsProps) => {
+const AnalyticsCharts = ({ sessions }: AnalyticsChartsProps) => {
   const stats = useMemo(() => {
-    const completed = sessions.filter((s: any) => s.status === "completed");
+    const completed = sessions.filter((s) => s.status === "completed");
     const pending = sessions.filter((s) => s.status === "pending");
     const totalCandidates = new Set(sessions.map((s) => s.user_id)).size;
     const avgScore =

@@ -15,7 +15,6 @@ import {
 } from "@/app/components/ui/tabs";
 import {
   Building2,
-  LogOut,
   KeyRound,
   FileText,
   Video,
@@ -37,8 +36,53 @@ const getReadableError = (error: unknown) => {
   return "Unexpected error while loading company data.";
 };
 
+interface CompanyMember {
+  id: string;
+  role: string;
+  user_id: string;
+  joined_at: string;
+}
+
+interface InterviewKit {
+  id: string;
+  title: string;
+  job_role: string;
+  questions: string[];
+  created_at: string;
+  [key: string]: unknown;
+}
+
+interface SessionFeedback {
+  content_score: number;
+  style_score: number;
+  overall_score: number;
+  summary: string;
+  strengths: string[];
+  improvements: string[];
+  content_analysis: string;
+  style_analysis: string;
+}
+
+interface CompanySession {
+  id: string;
+  user_id: string;
+  job_role: string;
+  question: string;
+  status: string;
+  overall_score: number | null;
+  content_score: number | null;
+  style_score: number | null;
+  video_url: string | null;
+  completed_at: string | null;
+  created_at: string;
+  ai_feedback: SessionFeedback | null;
+  interview_kit_id?: string | null;
+  company_id?: string;
+  updated_at?: string;
+}
+
 const CompanyDashboard = () => {
-  const { user, signOut, loading: authLoading } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const router = useRouter();
   const [company, setCompany] = useState<{
     id: string;
@@ -46,9 +90,9 @@ const CompanyDashboard = () => {
     invite_code: string;
   } | null>(null);
   const [userRole, setUserRole] = useState<string | null>(null);
-  const [members, setMembers] = useState<any[]>([]);
-  const [kits, setKits] = useState<any[]>([]);
-  const [sessions, setSessions] = useState<any[]>([]);
+  const [members, setMembers] = useState<CompanyMember[]>([]);
+  const [kits, setKits] = useState<InterviewKit[]>([]);
+  const [sessions, setSessions] = useState<CompanySession[]>([]);
   const [candidateProfiles, setCandidateProfiles] = useState<
     { user_id: string; full_name: string }[]
   >([]);
@@ -294,20 +338,23 @@ const CompanyDashboard = () => {
         throw new Error(`sessions load failed: ${sessionsRes.error.message}`);
       }
 
-      if (membersRes.data) setMembers(membersRes.data);
+      if (membersRes.data) setMembers(membersRes.data as CompanyMember[]);
       if (membersRes.data) {
-        const me = membersRes.data.find((m: any) => m.user_id === user.id);
-        if (me) setUserRole(me.role ?? userRole);
+        const me = (membersRes.data as CompanyMember[]).find(
+          (m) => m.user_id === user.id,
+        );
+        if (me) setUserRole(me.role ?? null);
       }
-      if (kitsRes.data) setKits(kitsRes.data);
+      if (kitsRes.data) setKits(kitsRes.data as InterviewKit[]);
       if (sessionsRes.data) {
-        setSessions(sessionsRes.data);
+        const companySessions = sessionsRes.data as CompanySession[];
+        setSessions(companySessions);
         // Fetch candidate profiles for completed sessions
         const userIds = [
           ...new Set(
-            sessionsRes.data
-              .filter((s: any) => s.status === "completed")
-              .map((s: any) => s.user_id),
+            companySessions
+              .filter((s) => s.status === "completed")
+              .map((s) => s.user_id),
           ),
         ];
         if (userIds.length > 0) {
@@ -342,11 +389,6 @@ const CompanyDashboard = () => {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
-
-  const handleSignOut = async () => {
-    await signOut();
-    router.push("/");
-  };
 
   if (initialLoad) {
     return (

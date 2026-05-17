@@ -5,6 +5,7 @@ import { Video, Menu, X } from "lucide-react";
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter, usePathname } from "next/navigation";
+import Link from "next/link";
 import { useAuth } from "@/lib/auth";
 
 const Navbar = () => {
@@ -27,34 +28,34 @@ const Navbar = () => {
   return (
     <nav className="fixed left-0 right-0 z-50 border-b top-2 md:left-10 md:right-10 border-border/40 dark:bg-primary/5 backdrop-blur-2xl rounded-2xl">
       <div className="container flex items-center justify-between h-16 px-6 mx-auto">
-        <a href="/" className="flex items-center gap-2.5 group">
+        <Link href="/" className="flex items-center gap-2.5 group">
           <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-primary ">
             <Video className="w-4.5 h-4.5 text-primary-foreground" />
           </div>
           <span className="text-lg font-bold tracking-tight font-display">
             InterviewAI
           </span>
-        </a>
+        </Link>
 
         <div className="items-center hidden gap-8 font-medium md:flex text-foreground">
-          <a
+          <Link
             href="/"
             className="text-sm transition-all duration-200 hover:scale-110"
           >
             Home
-          </a>
-          <a
+          </Link>
+          <Link
             href="/candidates"
             className="text-sm transition-all duration-200 hover:scale-110"
           >
             For Candidates
-          </a>
-          <a
+          </Link>
+          <Link
             href="/companies"
             className="text-sm transition-all duration-200 hover:scale-110"
           >
             For Companies
-          </a>
+          </Link>
           {/* <a
             href="/pricing"
             className="text-sm transition-all duration-200 hover:scale-110"
@@ -75,7 +76,7 @@ const Navbar = () => {
             </Button>
           ) : (
             <>
-              <a href="/candidate/auth">
+              <Link href="/candidate/auth">
                 <Button
                   variant="ghost"
                   size="sm"
@@ -83,15 +84,15 @@ const Navbar = () => {
                 >
                   Log In
                 </Button>
-              </a>
-              <a href="/company/auth">
+              </Link>
+              <Link href="/company/auth">
                 <Button
                   size="lg"
                   className="text-sm font-semibold transition-opacity bg-primary hover:opacity-80"
                 >
                   For Companies
                 </Button>
-              </a>
+              </Link>
             </>
           )}
         </div>
@@ -117,24 +118,24 @@ const Navbar = () => {
             className="overflow-hidden border-t md:hidden border-border/40 bg-background/95 backdrop-blur-2xl"
           >
             <div className="container flex flex-col gap-4 px-6 py-6 mx-auto">
-              <a
+              <Link
                 href="/"
                 className="py-2 text-sm font-medium sm:text-base text-muted-foreground hover:text-foreground"
               >
                 Home
-              </a>
-              <a
+              </Link>
+              <Link
                 href="/candidates"
                 className="py-2 text-sm font-medium sm:text-base text-muted-foreground hover:text-foreground"
               >
                 For Candidates
-              </a>
-              <a
+              </Link>
+              <Link
                 href="/companies"
                 className="py-2 text-sm font-medium sm:text-base text-muted-foreground hover:text-foreground"
               >
                 For Companies
-              </a>
+              </Link>
               {/* <a
                 href="/pricing"
                 className="py-2 text-sm font-medium sm:text-base text-muted-foreground hover:text-foreground"
@@ -149,19 +150,19 @@ const Navbar = () => {
                   </Button>
                 ) : (
                   <>
-                    <a href="/candidate/auth">
+                    <Link href="/candidate/auth">
                       <Button variant="outline" size="sm">
                         Log In
                       </Button>
-                    </a>
-                    <a href="/company/auth">
+                    </Link>
+                    <Link href="/company/auth">
                       <Button
                         size="sm"
                         className="transition-opacity bg-primary hover:opacity-90"
                       >
                         For Companies
                       </Button>
-                    </a>
+                    </Link>
                   </>
                 )}
               </div>

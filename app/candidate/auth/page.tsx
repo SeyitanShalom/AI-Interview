@@ -17,6 +17,14 @@ import {
 import { Video, ArrowLeft, User, Mail, Lock } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
+function safeRedirectPath(rawPath: string | null) {
+  if (!rawPath || !rawPath.startsWith("/") || rawPath.startsWith("//")) {
+    return "/candidate/dashboard";
+  }
+
+  return rawPath;
+}
+
 const CandidateAuth = () => {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState("");
@@ -34,8 +42,9 @@ const CandidateAuth = () => {
       return undefined;
     }
 
-    return `${window.location.origin}/auth/callback?next=/candidate/dashboard`;
-  }, []);
+    const next = safeRedirectPath(redirectTo);
+    return `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
+  }, [redirectTo]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -88,15 +97,42 @@ const CandidateAuth = () => {
           return;
         }
 
+        if (!isCandidateFromMetadata) {
+          await supabase.auth.updateUser({
+            data: {
+              ...user.user_metadata,
+              role: "candidate",
+            },
+          });
+        }
+
+        const profileName =
+          typeof user.user_metadata?.full_name === "string"
+            ? user.user_metadata.full_name.trim()
+            : "";
+
+        if (profileName) {
+          await supabase.from("profiles").upsert(
+            {
+              user_id: user.id,
+              full_name: profileName,
+            },
+            { onConflict: "user_id" },
+          );
+        }
+
+        const target = safeRedirectPath(redirectTo);
         setStatus({ type: "success", message: "Logged in successfully." });
-        router.replace(redirectTo || "/candidate/dashboard");
-        router.refresh();
+        window.location.assign(target);
       } else {
         const { data, error } = await supabase.auth.signUp({
           email: email,
           password: password,
           options: {
-            data: { role: "candidate" }, // This matches the trigger above!
+            data: {
+              role: "candidate",
+              full_name: fullName.trim(),
+            },
             emailRedirectTo,
           },
         });
@@ -108,6 +144,14 @@ const CandidateAuth = () => {
             user_id: data.user.id,
             role: "candidate",
           });
+
+          await supabase.from("profiles").upsert(
+            {
+              user_id: data.user.id,
+              full_name: fullName.trim(),
+            },
+            { onConflict: "user_id" },
+          );
         }
 
         setStatus({

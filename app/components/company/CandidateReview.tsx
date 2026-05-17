@@ -21,7 +21,6 @@ import {
   Target,
   TrendingUp,
   AlertTriangle,
-  X,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -88,7 +87,6 @@ const scoreBg = (score: number) => {
 const CandidateReview = ({
   sessions,
   profiles = [],
-  currentUserRole,
 }: CandidateReviewProps) => {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] =

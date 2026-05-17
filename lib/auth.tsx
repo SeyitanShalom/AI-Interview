@@ -6,7 +6,12 @@ import {
   useState,
   ReactNode,
 } from "react";
-import { User, Session, AuthChangeEvent } from "@supabase/supabase-js";
+import {
+  User,
+  Session,
+  AuthChangeEvent,
+  RealtimeChannel,
+} from "@supabase/supabase-js";
 
 interface AuthContextType {
   user: User | null;
@@ -30,7 +35,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let subscription: any = null;
+    let subscription: RealtimeChannel | null = null;
 
     const initAuth = async () => {
       const { supabase } = await import("@/lib/supabase");

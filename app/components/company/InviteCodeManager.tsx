@@ -78,7 +78,7 @@ const InviteCodeManager = ({
         title: "Copied!",
         description: "Invite link copied to clipboard.",
       });
-    } catch (err) {
+    } catch {
       toast({
         title: "Error",
         description: "Failed to share invite.",
@@ -147,7 +147,7 @@ const InviteCodeManager = ({
     const newCode = Math.random().toString(36).substring(2, 10);
     const { error } = await supabase
       .from("companies")
-      .update({ invite_code: newCode } as any)
+      .update({ invite_code: newCode } as Record<string, unknown>)
       .eq("id", company.id);
 
     if (error) {

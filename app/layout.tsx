@@ -1,15 +1,22 @@
 // "use client"
 import type { Metadata } from "next";
-import { Roboto as RobotoFont } from "next/font/google";
+import { Cabin, Sora } from "next/font/google";
 import "./globals.css";
 import Navbar from "./components/landing/Navbar";
 import { Toaster } from "./components/ui/sonner";
-import {Providers} from "./Providers";
-import {ThemeToggle} from "./components/ui/ThemeToggle";
+import { Providers } from "./Providers";
+import { ThemeToggle } from "./components/ui/ThemeToggle";
 
-const roboto = RobotoFont({
-  variable: "--font-roboto",
+const sora = Sora({
+  variable: "--font-sora",
   subsets: ["latin"],
+  display: "swap",
+});
+
+const cabin = Cabin({
+  variable: "--font-cabin",
+  subsets: ["latin"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -25,16 +32,16 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${roboto.variable} h-full antialiased`}
+      className={`${sora.variable} ${cabin.variable} h-full antialiased`}
       suppressHydrationWarning
     >
-      <body className="min-h-full flex flex-col">
-          <Providers>
-            <Navbar />
-            {children}
-            <ThemeToggle/>
-            <Toaster />
-          </Providers>
+      <body className={`${cabin.className} min-h-full flex flex-col`}>
+        <Providers>
+          <Navbar />
+          {children}
+          <ThemeToggle />
+          <Toaster />
+        </Providers>
       </body>
     </html>
   );

@@ -15,7 +15,6 @@ import {
   CardTitle,
 } from "@/app/components/ui/card";
 import {
-  Video,
   ArrowLeft,
   Building2,
   Mail,
@@ -56,7 +55,15 @@ const CompanyAuth = () => {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    setSecureInviteTokenFromQuery(params.get("secure"));
+    const secureToken = params.get("secure");
+    const invite = params.get("invite");
+
+    setSecureInviteTokenFromQuery(secureToken);
+
+    if (invite) {
+      setMode("join");
+      setInviteCode(invite);
+    }
   }, []);
 
   useEffect(() => {
@@ -253,10 +260,10 @@ const CompanyAuth = () => {
 
       toast({ title: "Welcome back!", description: "Logged in successfully." });
       router.push("/company/dashboard");
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: "Error",
-        description: error.message,
+        description: error instanceof Error ? error.message : "An error occurred",
         variant: "destructive",
       });
     } finally {
@@ -320,10 +327,10 @@ const CompanyAuth = () => {
             "Check your email to verify your account. You'll receive your team invite code after verification.",
         });
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: "Error",
-        description: error.message,
+        description: error instanceof Error ? error.message : "An error occurred",
         variant: "destructive",
       });
     } finally {
@@ -406,10 +413,10 @@ const CompanyAuth = () => {
         title: `Joined ${company.name}!`,
         description: "Check your email to verify your account.",
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: "Error",
-        description: error.message,
+        description: error instanceof Error ? error.message : "An error occurred",
         variant: "destructive",
       });
     } finally {

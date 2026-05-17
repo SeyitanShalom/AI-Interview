@@ -27,7 +27,7 @@ const CandidateProfile = () => {
         if (data && typeof data.resume_url === "string") {
           setResumeUrl(data.resume_url);
         }
-      } catch (err) {
+      } catch {
         // ignore
       }
     };
@@ -119,7 +119,7 @@ const CandidateProfile = () => {
             <div className="flex items-center gap-3">
               <Input
                 type="file"
-                onChange={(e: any) => handleUpload(e.target.files?.[0] ?? null)}
+                onChange={(e) => handleUpload(e.target.files?.[0] ?? null)}
                 accept="application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
               />
               {uploading && (

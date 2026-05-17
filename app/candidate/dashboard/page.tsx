@@ -2,9 +2,16 @@
 
 export const dynamic = "force-dynamic";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import {
+  Suspense,
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+} from "react";
 import { useAuth } from "@/lib/auth";
-import { useRouter } from "next/navigation";
+import { useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import {
   FunctionsHttpError,
@@ -27,14 +34,15 @@ import {
   TabsTrigger,
 } from "@/app/components/ui/tabs";
 import {
-  Video,
-  LogOut,
   Play,
   History,
   Loader2,
   Send,
   Bot,
   Sparkles,
+  FileText,
+  ArrowRight,
+  UserCircle,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useVideoRecorder } from "@/app/components/hooks/useVideoRecorder";
@@ -74,12 +82,37 @@ interface Session {
   video_url: string | null;
 }
 
+interface InterviewKit {
+  id: string;
+  title: string;
+  job_role: string;
+  company_id: string;
+  questions: string[];
+}
+
+interface BrowserSpeechRecognitionAlternative {
+  transcript: string;
+}
+
+interface BrowserSpeechRecognitionResult {
+  [index: number]: BrowserSpeechRecognitionAlternative | undefined;
+}
+
+interface BrowserSpeechRecognitionEvent {
+  results: ArrayLike<BrowserSpeechRecognitionResult>;
+}
+
+interface BrowserSpeechRecognitionErrorEvent {
+  error?: string;
+  message?: string;
+}
+
 interface SpeechRecognitionInstance {
   continuous: boolean;
   interimResults: boolean;
   lang: string;
-  onresult: ((event: any) => void) | null;
-  onerror: ((event: any) => void) | null;
+  onresult: ((event: BrowserSpeechRecognitionEvent) => void) | null;
+  onerror: ((event: BrowserSpeechRecognitionErrorEvent) => void) | null;
   onend: (() => void) | null;
   start: () => void;
   stop: () => void;
@@ -97,13 +130,18 @@ type LocalTranscriptionPayload = {
 
 const MIN_TRANSCRIPT_WORDS = 20;
 
-const CandidateDashboard = () => {
-  const { user, signOut } = useAuth();
-  const router = useRouter();
+const CandidateDashboardContent = () => {
+  const { user } = useAuth();
+  const searchParams = useSearchParams();
+  const kitId = searchParams.get("kit");
   const recorder = useVideoRecorder();
 
   const [step, setStep] = useState<InterviewStep>("setup");
   const [jobRole, setJobRole] = useState("Software Engineer");
+  const [linkedKit, setLinkedKit] = useState<InterviewKit | null>(null);
+  const [kitLoading, setKitLoading] = useState(false);
+  const [kitError, setKitError] = useState<string | null>(null);
+  const [activeKitQuestionIndex, setActiveKitQuestionIndex] = useState(0);
   const [currentQuestion, setCurrentQuestion] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
@@ -203,27 +241,112 @@ const CandidateDashboard = () => {
   }, [user, step]);
 
   useEffect(() => {
+    let cancelled = false;
+
+    if (!kitId) {
+      setLinkedKit(null);
+      setKitError(null);
+      setKitLoading(false);
+      setActiveKitQuestionIndex(0);
+      return;
+    }
+
+    const loadLinkedKit = async () => {
+      setKitLoading(true);
+      setKitError(null);
+
+      try {
+        const response = await fetch(
+          `/api/interview-kits/${encodeURIComponent(kitId)}`,
+        );
+        const payload = (await response.json().catch(() => ({}))) as
+          | InterviewKit
+          | { error?: string };
+
+        if (!response.ok || !("id" in payload)) {
+          throw new Error(
+            "error" in payload && payload.error
+              ? payload.error
+              : "Interview kit could not be loaded.",
+          );
+        }
+
+        const questions = Array.isArray(payload.questions)
+          ? payload.questions.filter(
+              (question): question is string =>
+                typeof question === "string" && question.trim().length > 0,
+            )
+          : [];
+
+        if (questions.length === 0) {
+          throw new Error("This interview kit does not contain any questions.");
+        }
+
+        if (!cancelled) {
+          setLinkedKit({ ...payload, questions });
+          setJobRole(payload.job_role);
+          setActiveKitQuestionIndex(0);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          const message =
+            error instanceof Error
+              ? error.message
+              : "Interview kit could not be loaded.";
+          setLinkedKit(null);
+          setKitError(message);
+          toast.error("Interview kit unavailable", {
+            description: message,
+          });
+        }
+      } finally {
+        if (!cancelled) {
+          setKitLoading(false);
+        }
+      }
+    };
+
+    loadLinkedKit();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [kitId]);
+
+  useEffect(() => {
     if (typeof window === "undefined") return;
 
     const recognitionCtor =
-      (window as any).SpeechRecognition ||
-      (window as any).webkitSpeechRecognition;
+      (
+        window as unknown as {
+          SpeechRecognition?: SpeechRecognitionConstructor;
+          webkitSpeechRecognition?: SpeechRecognitionConstructor;
+        }
+      ).SpeechRecognition ||
+      (
+        window as unknown as {
+          webkitSpeechRecognition?: SpeechRecognitionConstructor;
+        }
+      ).webkitSpeechRecognition;
 
     setTranscriptionMode(recognitionCtor ? "browser-stt" : "local-whisper");
   }, []);
 
-  const handleSignOut = async () => {
-    await signOut();
-    router.push("/");
-  };
-
   const startSpeechRecognition = useCallback(() => {
     if (typeof window === "undefined") return;
 
-    const recognitionCtor = ((window as any).SpeechRecognition ||
-      (window as any).webkitSpeechRecognition) as
-      | SpeechRecognitionConstructor
-      | undefined;
+    const recognitionCtor =
+      (
+        window as unknown as {
+          SpeechRecognition?: SpeechRecognitionConstructor;
+          webkitSpeechRecognition?: SpeechRecognitionConstructor;
+        }
+      ).SpeechRecognition ||
+      (
+        window as unknown as {
+          webkitSpeechRecognition?: SpeechRecognitionConstructor;
+        }
+      ).webkitSpeechRecognition;
 
     if (!recognitionCtor) {
       return false;
@@ -234,9 +357,12 @@ const CandidateDashboard = () => {
     recognition.interimResults = true;
     recognition.lang = "en-US";
 
-    recognition.onresult = (event: any) => {
+    recognition.onresult = (event: BrowserSpeechRecognitionEvent) => {
       const combinedTranscript = Array.from(event.results)
-        .map((result: any) => result?.[0]?.transcript || "")
+        .map(
+          (result: BrowserSpeechRecognitionResult) =>
+            result?.[0]?.transcript || "",
+        )
         .join(" ")
         .trim();
       setAnswerTranscript(combinedTranscript);
@@ -274,61 +400,84 @@ const CandidateDashboard = () => {
 
       let question = "";
 
-      try {
-        const { data, error } = await supabase.functions.invoke(
-          "generate-question",
-          {
-            body: { jobRole },
-          },
-        );
-
-        if (error) throw error;
-
+      if (linkedKit) {
         question =
-          typeof data?.question === "string" ? data.question.trim() : "";
+          linkedKit.questions[activeKitQuestionIndex]?.trim() ||
+          linkedKit.questions[0]?.trim() ||
+          "";
 
         if (!question) {
-          throw new Error("No interview question returned from AI provider");
+          throw new Error("This interview kit does not have a valid question.");
         }
-      } catch (e: unknown) {
-        question = getBackupQuestion(jobRole);
+      } else {
+        try {
+          const { data, error } = await supabase.functions.invoke(
+            "generate-question",
+            {
+              body: { jobRole },
+            },
+          );
 
-        if (e instanceof FunctionsHttpError && e.context.status === 429) {
-          toast.warning("Rate limit reached", {
-            description:
-              "AI quota is exhausted, so we started with a backup question.",
-          });
-        } else if (e instanceof FunctionsHttpError) {
-          toast.warning("AI temporarily unavailable", {
-            description:
-              "Started with a backup question so you can continue practicing.",
-          });
-        } else if (
-          e instanceof FunctionsRelayError ||
-          e instanceof FunctionsFetchError
-        ) {
-          toast.warning("Network issue detected", {
-            description:
-              "Started with a backup question while AI service reconnects.",
-          });
-        } else {
-          toast.warning("AI unavailable", {
-            description:
-              "Started with a backup question so your interview is not blocked.",
-          });
+          if (error) throw error;
+
+          question =
+            typeof data?.question === "string" ? data.question.trim() : "";
+
+          if (!question) {
+            throw new Error("No interview question returned from AI provider");
+          }
+        } catch (e: unknown) {
+          question = getBackupQuestion(jobRole);
+
+          if (e instanceof FunctionsHttpError && e.context.status === 429) {
+            toast.warning("Rate limit reached", {
+              description:
+                "AI quota is exhausted, so we started with a backup question.",
+            });
+          } else if (e instanceof FunctionsHttpError) {
+            toast.warning("AI temporarily unavailable", {
+              description:
+                "Started with a backup question so you can continue practicing.",
+            });
+          } else if (
+            e instanceof FunctionsRelayError ||
+            e instanceof FunctionsFetchError
+          ) {
+            toast.warning("Network issue detected", {
+              description:
+                "Started with a backup question while AI service reconnects.",
+            });
+          } else {
+            toast.warning("AI unavailable", {
+              description:
+                "Started with a backup question so your interview is not blocked.",
+            });
+          }
         }
       }
 
-      setCurrentQuestion(question);
+      const sessionPayload: {
+        user_id: string;
+        job_role: string;
+        question: string;
+        status: string;
+        company_id?: string;
+        interview_kit_id?: string;
+      } = {
+        user_id: user.id,
+        job_role: linkedKit?.job_role || jobRole,
+        question,
+        status: "pending",
+      };
+
+      if (linkedKit) {
+        sessionPayload.company_id = linkedKit.company_id;
+        sessionPayload.interview_kit_id = linkedKit.id;
+      }
 
       const { data: session, error: sessionError } = await supabase
         .from("interview_sessions")
-        .insert({
-          user_id: user.id,
-          job_role: jobRole,
-          question,
-          status: "pending",
-        })
+        .insert(sessionPayload)
         .select()
         .single();
 
@@ -339,6 +488,8 @@ const CandidateDashboard = () => {
             .join(" | ") || "Failed to create interview session";
         throw new Error(sessionErrorMessage);
       }
+
+      setCurrentQuestion(question);
       setCurrentSessionId(session.id);
 
       const stream = await recorder.startCamera();
@@ -372,6 +523,8 @@ const CandidateDashboard = () => {
     getBackupQuestion,
     normalizeErrorMessage,
     toUserFriendlyStartError,
+    linkedKit,
+    activeKitQuestionIndex,
   ]);
 
   const handleStartRecording = () => {
@@ -504,9 +657,10 @@ const CandidateDashboard = () => {
 
       setFeedback(data.feedback);
       setStep("feedback");
-    } catch (e: any) {
+    } catch (e: unknown) {
       toast.error("Error", {
-        description: e?.message ?? "Failed to submit answer",
+        description:
+          e instanceof Error ? e.message : "Failed to submit answer",
       });
       setStep("interview");
     }
@@ -527,6 +681,23 @@ const CandidateDashboard = () => {
     setCurrentQuestion("");
     setSelectedSession(null);
     setAnswerTranscript("");
+  };
+
+  const handleNextKitQuestion = () => {
+    if (!linkedKit) return;
+
+    stopSpeechRecognition();
+    recorder.stopCamera();
+    recorder.resetRecording();
+    setFeedback(null);
+    setCurrentSessionId(null);
+    setCurrentQuestion("");
+    setSelectedSession(null);
+    setAnswerTranscript("");
+    setActiveKitQuestionIndex((index) =>
+      Math.min(index + 1, linkedKit.questions.length - 1),
+    );
+    setStep("setup");
   };
 
   const viewSession = (sessionId: string) => {
@@ -555,9 +726,10 @@ const CandidateDashboard = () => {
       toast.success("Session deleted", {
         description: "The interview session has been removed.",
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast.error("Error", {
-        description: error?.message ?? "Failed to delete session",
+        description:
+          error instanceof Error ? error.message : "Failed to delete session",
       });
     }
   };
@@ -618,7 +790,7 @@ const CandidateDashboard = () => {
                   {selectedSession.job_role} Interview
                 </h2>
                 <p className="text-sm text-muted-foreground">
-                  "{selectedSession.question}"
+                  &quot;{selectedSession.question}&quot;
                 </p>
               </div>
               <Button
@@ -664,26 +836,36 @@ const CandidateDashboard = () => {
             >
               <div>
                 <h1 className="text-xl font-bold tracking-tight md:text-2xl font-display">
-                  Practice Interview
+                  {linkedKit ? linkedKit.title : "Practice Interview"}
                 </h1>
                 <p className="text-xs md:text-sm text-muted-foreground">
-                  AI-powered mock interviews with real-time feedback
+                  {linkedKit
+                    ? `${linkedKit.job_role} interview kit`
+                    : "AI-powered mock interviews with real-time feedback"}
                 </p>
               </div>
-              <TabsList className="p-1 border bg-secondary/30 backdrop-blur-sm border-border/30">
-                <TabsTrigger
-                  value="practice"
-                  className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_0_16px_-4px_hsl(var(--primary)/0.4)] transition-all"
-                >
-                  <Play className="w-4 h-4" /> Practice
-                </TabsTrigger>
-                <TabsTrigger
-                  value="history"
-                  className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_0_16px_-4px_hsl(var(--primary)/0.4)] transition-all"
-                >
-                  <History className="w-4 h-4" /> History
-                </TabsTrigger>
-              </TabsList>
+              <div className="flex items-center gap-3">
+                <Link href="/candidate/profile">
+                  <Button variant="outline" size="sm" className="gap-2">
+                    <UserCircle className="h-4 w-4" />
+                    Profile
+                  </Button>
+                </Link>
+                <TabsList className="p-1 border bg-secondary/30 backdrop-blur-sm border-border/30">
+                  <TabsTrigger
+                    value="practice"
+                    className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_0_16px_-4px_hsl(var(--primary)/0.4)] transition-all"
+                  >
+                    <Play className="w-4 h-4" /> Practice
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="history"
+                    className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_0_16px_-4px_hsl(var(--primary)/0.4)] transition-all"
+                  >
+                    <History className="w-4 h-4" /> History
+                  </TabsTrigger>
+                </TabsList>
+              </div>
             </motion.div>
 
             <TabsContent value="practice">
@@ -701,14 +883,47 @@ const CandidateDashboard = () => {
                           <Bot className="w-10 h-10 text-primary" />
                         </div>
                         <CardTitle className="text-xl font-display">
-                          Start Practice Session
+                          {linkedKit
+                            ? "Start Interview Kit"
+                            : "Start Practice Session"}
                         </CardTitle>
                         <p className="text-sm text-muted-foreground">
-                          Our AI interviewer will ask you a question. Record
-                          your answer and get instant feedback.
+                          {linkedKit
+                            ? "Answer this company question on video and get instant feedback."
+                            : "Our AI interviewer will ask you a question. Record your answer and get instant feedback."}
                         </p>
                       </CardHeader>
                       <CardContent className="space-y-4">
+                        {kitLoading && (
+                          <div className="flex items-center gap-2 rounded-xl border border-border/50 bg-secondary/30 px-4 py-3 text-sm text-muted-foreground">
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            Loading interview kit...
+                          </div>
+                        )}
+
+                        {kitError && (
+                          <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                            {kitError}
+                          </div>
+                        )}
+
+                        {linkedKit && (
+                          <div className="rounded-xl border border-primary/20 bg-primary/10 px-4 py-3">
+                            <div className="flex items-start gap-3">
+                              <FileText className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                              <div>
+                                <p className="text-sm font-medium text-foreground">
+                                  {linkedKit.title}
+                                </p>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  Question {activeKitQuestionIndex + 1} of{" "}
+                                  {linkedKit.questions.length}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
                         <div>
                           <label className="block mb-2 text-sm font-medium text-foreground">
                             Job Role
@@ -717,12 +932,18 @@ const CandidateDashboard = () => {
                             value={jobRole}
                             onChange={(e) => setJobRole(e.target.value)}
                             placeholder="e.g. Software Engineer, Product Manager"
+                            disabled={!!linkedKit}
                             className="bg-secondary/50 border-border/50 focus:border-primary/50 focus:ring-primary/20"
                           />
                         </div>
                         <Button
                           onClick={startInterview}
-                          disabled={isGenerating || !jobRole.trim()}
+                          disabled={
+                            isGenerating ||
+                            kitLoading ||
+                            !jobRole.trim() ||
+                            (!!kitId && !linkedKit)
+                          }
                           className="w-full gap-2 bg-linear-to-r from-primary to-primary-glow hover:opacity-90 transition-opacity shadow-[0_0_20px_-4px_hsl(var(--primary)/0.4)]"
                           size="lg"
                         >
@@ -733,7 +954,10 @@ const CandidateDashboard = () => {
                             </>
                           ) : (
                             <>
-                              <Sparkles className="w-4 h-4" /> Start Interview
+                              <Sparkles className="w-4 h-4" />{" "}
+                              {linkedKit
+                                ? "Start Kit Question"
+                                : "Start Interview"}
                             </>
                           )}
                         </Button>
@@ -832,10 +1056,24 @@ const CandidateDashboard = () => {
                         Your Feedback
                       </h2>
                       <Button
-                        onClick={resetToSetup}
+                        onClick={
+                          linkedKit &&
+                          activeKitQuestionIndex < linkedKit.questions.length - 1
+                            ? handleNextKitQuestion
+                            : resetToSetup
+                        }
                         className="gap-2 bg-linear-to-r from-primary to-primary-glow hover:opacity-90"
                       >
-                        <Play className="w-4 h-4" /> Practice Again
+                        {linkedKit &&
+                        activeKitQuestionIndex < linkedKit.questions.length - 1 ? (
+                          <>
+                            <ArrowRight className="w-4 h-4" /> Next Question
+                          </>
+                        ) : (
+                          <>
+                            <Play className="w-4 h-4" /> Practice Again
+                          </>
+                        )}
                       </Button>
                     </div>
                     <FeedbackDisplay feedback={feedback} />
@@ -858,4 +1096,19 @@ const CandidateDashboard = () => {
   );
 };
 
-export default CandidateDashboard;
+const DashboardFallback = () => (
+  <div className="flex min-h-screen items-center justify-center bg-background">
+    <div className="relative">
+      <div className="w-12 h-12 border-2 rounded-full border-primary/30 border-t-primary animate-spin" />
+      <div className="absolute inset-0 w-12 h-12 rounded-full animate-pulse-glow bg-primary/10" />
+    </div>
+  </div>
+);
+
+export default function CandidateDashboard() {
+  return (
+    <Suspense fallback={<DashboardFallback />}>
+      <CandidateDashboardContent />
+    </Suspense>
+  );
+}

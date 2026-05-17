@@ -1,14 +1,55 @@
 import React from "react";
 import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
+import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
 interface PageProps {
-  params: { id: string };
+  params: Promise<{ id: string }>;
+}
+
+interface SharedKit {
+  id: string;
+  title: string;
+  job_role: string;
+  questions: unknown;
+  created_at: string;
+}
+
+function isMissingRpcError(error: { code?: string; message?: string }) {
+  return (
+    error.code === "PGRST202" ||
+    error.message?.toLowerCase().includes("get_shared_interview_kit")
+  );
+}
+
+function normalizeQuestions(rawQuestions: unknown) {
+  if (Array.isArray(rawQuestions)) {
+    return rawQuestions
+      .map((question) => String(question).trim())
+      .filter(Boolean);
+  }
+
+  if (typeof rawQuestions === "string") {
+    try {
+      const parsed = JSON.parse(rawQuestions) as unknown;
+      if (Array.isArray(parsed)) {
+        return parsed
+          .map((question) => String(question).trim())
+          .filter(Boolean);
+      }
+    } catch {
+      return rawQuestions.trim() ? [rawQuestions.trim()] : [];
+    }
+  }
+
+  return [];
 }
 
 export default async function KitPage({ params }: PageProps) {
+  const { id } = await params;
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -16,21 +57,45 @@ export default async function KitPage({ params }: PageProps) {
     throw new Error("Missing Supabase configuration.");
   }
 
-  const supabase = createServerClient(supabaseUrl, supabaseKey);
+  const cookieStore = await cookies();
+  const supabase = createServerClient(supabaseUrl, supabaseKey, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
+      },
+      setAll(cookiesToSet) {
+        cookiesToSet.forEach(({ name, value, options }) => {
+          try {
+            cookieStore.set(name, value, options);
+          } catch {
+            // Server components can read cookies, but may not always set them.
+          }
+        });
+      },
+    },
+  });
 
-  const { data: kit } = await supabase
-    .from("interview_kits")
-    .select("id, title, job_role, questions, created_at")
-    .eq("id", params.id)
+  const { data: sharedKit, error: sharedKitError } = await supabase
+    .rpc("get_shared_interview_kit", { kit_uuid: id })
     .maybeSingle();
+
+  let kit = sharedKit as SharedKit | null;
+
+  if (sharedKitError && isMissingRpcError(sharedKitError)) {
+    const { data: fallbackKit } = await supabase
+      .from("interview_kits")
+      .select("id, title, job_role, questions, created_at")
+      .eq("id", id)
+      .maybeSingle();
+
+    kit = fallbackKit as SharedKit | null;
+  } else if (sharedKitError) {
+    return notFound();
+  }
 
   if (!kit) return notFound();
 
-  const questions: string[] = Array.isArray(kit.questions)
-    ? (kit.questions as string[])
-    : typeof kit.questions === "string"
-    ? JSON.parse(kit.questions || "[]")
-    : [];
+  const questions = normalizeQuestions(kit.questions);
 
   return (
     <div className="min-h-screen bg-background py-12">
@@ -60,18 +125,18 @@ export default async function KitPage({ params }: PageProps) {
         </div>
 
         <div className="mt-6 flex items-center gap-3">
-          <a
+          <Link
             href={`/candidate/dashboard?kit=${encodeURIComponent(kit.id)}`}
             className="inline-flex items-center px-4 py-2 rounded-md bg-linear-to-r from-primary to-primary-glow text-primary-foreground"
           >
             Open in Interview App
-          </a>
-          <a
+          </Link>
+          <Link
             href="/"
             className="inline-flex items-center px-4 py-2 rounded-md border border-border/40 text-muted-foreground"
           >
             Return Home
-          </a>
+          </Link>
         </div>
       </div>
     </div>

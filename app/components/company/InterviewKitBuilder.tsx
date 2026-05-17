@@ -132,7 +132,7 @@ const InterviewKitBuilder = ({
       company_id: companyId,
       title: title.trim(),
       job_role: jobRole.trim(),
-      questions: filteredQuestions as any,
+      questions: filteredQuestions,
       created_by: user!.id,
     });
 

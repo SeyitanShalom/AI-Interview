@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable react/no-unescaped-entities */
 import { motion } from "framer-motion";
 import { Button } from "@/app/components/ui/button";
 import { Check, Sparkles, Building2, User } from "lucide-react";

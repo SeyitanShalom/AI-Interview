@@ -252,8 +252,11 @@ async function updateSessionFeedback(
     .from("interview_sessions")
     .update({
       ai_feedback: feedback,
+      content_score: feedback.content_score,
+      style_score: feedback.style_score,
       overall_score: feedback.overall_score,
       status: "completed",
+      completed_at: new Date().toISOString(),
     })
     .eq("id", sessionId);
 }

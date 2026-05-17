@@ -1,4 +1,5 @@
 "use client";
+import type { ComponentType } from "react";
 import { motion } from "framer-motion";
 import {
   UserCheck,
@@ -63,7 +64,7 @@ const FeatureCard = ({
   desc,
   index,
 }: {
-  icon: any;
+  icon: ComponentType<{ className: string }>;
   title: string;
   desc: string;
   index: number;
@@ -101,13 +102,13 @@ const ForWho = () => {
           className="mb-16 text-center"
         >
           <span className="block mb-3 text-xs font-semibold tracking-widest uppercase text-primary">
-            Who It's For
+            Who It&apos;s For
           </span>
           <h2 className="mb-4 text-4xl font-display md:text-5xl">
             Built for <span className="text-gradient-primary">Everyone</span>
           </h2>
           <p className="max-w-xl mx-auto md:text-lg text-muted-foreground">
-            Whether you're preparing for your dream job or hiring the best
+            Whether you&apos;re preparing for your dream job or hiring the best
             talent.
           </p>
         </motion.div>

@@ -4,9 +4,10 @@ import {
   createContext,
   useCallback,
   useContext,
-  useEffect,
+  useLayoutEffect,
   useMemo,
   useState,
+  useSyncExternalStore,
 } from "react";
 
 type Theme = "light" | "dark";
@@ -35,9 +36,17 @@ function getInitialTheme(): Theme {
     : "light";
 }
 
+const subscribeToMounted = () => () => {};
+const getMountedSnapshot = () => true;
+const getServerMountedSnapshot = () => false;
+
 export function AppThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>("light");
-  const [isMounted, setIsMounted] = useState(false);
+  const [theme, setThemeState] = useState<Theme>(() => getInitialTheme());
+  const isMounted = useSyncExternalStore(
+    subscribeToMounted,
+    getMountedSnapshot,
+    getServerMountedSnapshot,
+  );
 
   const setTheme = useCallback((nextTheme: Theme) => {
     setThemeState(nextTheme);
@@ -49,19 +58,12 @@ export function AppThemeProvider({ children }: { children: React.ReactNode }) {
     );
   }, []);
 
-  useEffect(() => {
-    setThemeState(getInitialTheme());
-    setIsMounted(true);
-  }, []);
-
-  useEffect(() => {
-    if (!isMounted) return;
-
+  useLayoutEffect(() => {
     const root = document.documentElement;
     root.classList.toggle("dark", theme === "dark");
     root.style.colorScheme = theme;
     window.localStorage.setItem(THEME_STORAGE_KEY, theme);
-  }, [theme, isMounted]);
+  }, [theme]);
 
   const value = useMemo(
     () => ({ theme, isMounted, setTheme, toggleTheme }),
