@@ -62,6 +62,7 @@ interface Session {
 interface CandidateProfile {
   user_id: string;
   full_name: string;
+  resume_summary?: string | null;
 }
 
 interface CandidateReviewProps {
@@ -84,10 +85,7 @@ const scoreBg = (score: number) => {
   return "bg-destructive/10 border-destructive/20";
 };
 
-const CandidateReview = ({
-  sessions,
-  profiles = [],
-}: CandidateReviewProps) => {
+const CandidateReview = ({ sessions, profiles = [] }: CandidateReviewProps) => {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] =
     useState<SessionStatusFilter>("completed");
@@ -137,8 +135,14 @@ const CandidateReview = ({
     [sessions],
   );
 
+  const profileByUserId = useMemo(() => {
+    return new Map(
+      profiles.map((profile) => [profile.user_id, profile] as const),
+    );
+  }, [profiles]);
+
   const getProfileName = (userId: string) => {
-    const profile = profiles.find((p) => p.user_id === userId);
+    const profile = profileByUserId.get(userId);
     return profile?.full_name || null;
   };
 
@@ -269,6 +273,8 @@ const CandidateReview = ({
           const isExpanded = expandedId === session.id;
           const candidateName = getProfileName(session.user_id);
           const feedback = session.ai_feedback;
+          const candidateProfile = profileByUserId.get(session.user_id);
+          const resumeSummary = candidateProfile?.resume_summary?.trim();
 
           return (
             <motion.div
@@ -341,6 +347,17 @@ const CandidateReview = ({
                 </CardHeader>
 
                 <CardContent className="pt-0 space-y-3">
+                  {resumeSummary ? (
+                    <div className="rounded-xl border border-border/30 bg-secondary/20 p-3">
+                      <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        Resume summary
+                      </p>
+                      <p className="text-sm leading-6 text-foreground">
+                        {resumeSummary}
+                      </p>
+                    </div>
+                  ) : null}
+
                   <p className="text-sm text-muted-foreground line-clamp-2">
                     <span className="font-medium text-foreground">Q:</span>{" "}
                     {session.question}

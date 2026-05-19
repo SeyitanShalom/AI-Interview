@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
-import { supabase } from "@/lib/supabase";
 import { Button } from "@/app/components/ui/button";
 import { Input } from "@/app/components/ui/input";
 import { toast } from "sonner";
@@ -12,6 +11,7 @@ import { useRouter } from "next/navigation";
 const CandidateProfile = () => {
   const { user } = useAuth();
   const [resumeUrl, setResumeUrl] = useState<string | null>(null);
+  const [resumeSummary, setResumeSummary] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const router = useRouter();
 
@@ -19,13 +19,18 @@ const CandidateProfile = () => {
     if (!user) return;
     const load = async () => {
       try {
+        const { supabase } = await import("@/lib/supabase");
+
         const { data } = await supabase
           .from("profiles")
-          .select("resume_url")
+          .select("resume_url, resume_summary")
           .eq("user_id", user.id)
           .single();
         if (data && typeof data.resume_url === "string") {
           setResumeUrl(data.resume_url);
+        }
+        if (data && typeof data.resume_summary === "string") {
+          setResumeSummary(data.resume_summary);
         }
       } catch {
         // ignore
@@ -38,27 +43,51 @@ const CandidateProfile = () => {
     if (!file || !user) return;
     setUploading(true);
     try {
-      const filePath = `${user.id}/resume-${Date.now()}-${file.name}`;
-      const { error: uploadError } = await supabase.storage
-        .from("resumes")
-        .upload(filePath, file, { contentType: file.type, upsert: true });
+      // Optimistic UI: show a processing placeholder while server works
+      setResumeSummary("Processing summary…");
 
-      if (uploadError) throw uploadError;
+      const form = new FormData();
+      form.append("file", file);
 
-      const { data: urlData } = supabase.storage
-        .from("resumes")
-        .getPublicUrl(filePath);
+      // attempt to include the user's access token so the server can validate
+      const { supabase } = await import("@/lib/supabase");
+      const sessionRes = await supabase.auth.getSession();
+      const token = sessionRes?.data?.session?.access_token ?? null;
 
-      const publicUrl = urlData.publicUrl;
+      const res = await fetch("/api/candidate/resume", {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        body: form,
+      });
 
-      await supabase
-        .from("profiles")
-        .upsert(
-          { user_id: user.id, resume_url: publicUrl },
-          { onConflict: "user_id" },
-        );
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "Upload failed");
 
-      setResumeUrl(publicUrl || null);
+      const publicUrl = json.publicUrl ?? null;
+
+      setResumeUrl(publicUrl);
+      // Prefer returned persisted profile (snake_case) if available
+      if (json?.profile?.resume_summary) {
+        setResumeSummary(json.profile.resume_summary);
+      } else if (json.resumeSummary) {
+        setResumeSummary(json.resumeSummary);
+      }
+
+      // Refresh persisted profile from server to ensure DB upsert succeeded
+      try {
+        const debugRes = await fetch("/api/candidate/resume/debug", {
+          method: "GET",
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        });
+        const debugJson = await debugRes.json();
+        if (debugRes.ok && debugJson?.profile?.resume_summary) {
+          setResumeSummary(debugJson.profile.resume_summary);
+        } else {
+          console.debug("resume debug response:", debugJson);
+        }
+      } catch (e) {
+        console.debug("failed to refresh profile after upload", e);
+      }
       toast.success("Resume uploaded");
     } catch (err) {
       console.error(err);
@@ -79,6 +108,11 @@ const CandidateProfile = () => {
     }
 
     try {
+      const { supabase } = await import("@/lib/supabase");
+
+      const session = await supabase.auth.getSession();
+      console.debug("supabase session before delete:", session);
+
       const { error } = await supabase.storage.from("resumes").remove([path]);
       if (error) throw error;
       await supabase
@@ -149,6 +183,21 @@ const CandidateProfile = () => {
             ) : (
               <div className="text-sm text-muted-foreground">
                 No resume uploaded
+              </div>
+            )}
+          </div>
+
+          <div>
+            <label className="block mb-2 text-sm font-medium text-foreground">
+              Resume Summary
+            </label>
+            {resumeSummary ? (
+              <div className="rounded-xl border border-border/50 bg-secondary/20 p-4 text-sm text-muted-foreground leading-6">
+                {resumeSummary}
+              </div>
+            ) : (
+              <div className="text-sm text-muted-foreground">
+                No resume summary available yet.
               </div>
             )}
           </div>

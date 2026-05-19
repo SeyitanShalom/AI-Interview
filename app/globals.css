@@ -93,7 +93,7 @@ body {
   --primary: hsl(176 100% 38%);
   --primary-foreground: hsl(189 45% 12%);
 
-  --primary-glow: hsl(176, 100%, 50%);
+  --primary-glow: hsl(183, 100%, 50%);
 
   --secondary: hsl(176, 7%, 52%);
   --secondary-foreground: hsl(210 40% 90%);
@@ -153,10 +153,10 @@ body {
   --popover: hsl(182, 100%, 3%);
   --popover-foreground: hsl(210 40% 96%);
 
-  --primary: hsl(176, 100%, 50%);
+  --primary: hsl(183, 100%, 50%);
   --primary-foreground: hsl(182, 100%, 3%);
 
-  --primary-glow: hsl(176, 100%, 50%);
+  --primary-glow: hsl(183, 100%, 50%);
 
   --secondary: hsl(182, 33%, 16%);
   --secondary-foreground: hsl(210 40% 90%);
@@ -164,7 +164,7 @@ body {
   --muted: hsl(222 30% 12%);
   --muted-foreground: hsl(172, 12%, 64%);
 
-  --accent: hsl(176, 100%, 50%);
+  --accent: hsl(183, 100%, 50%);
   --accent-foreground: hsl(182, 100%, 3%);
 
   --destructive: hsl(0 84% 60%);
@@ -172,7 +172,7 @@ body {
 
   --border: hsl(0, 0%, 100%);
   --input: hsl(182, 100%, 3%);
-  --ring: hsl(176, 100%, 50%);
+  --ring: hsl(183, 100%, 50%);
 
   --radius: 0.75rem;
   --text-small: 1rem;
@@ -181,18 +181,18 @@ body {
 
   --sidebar-background: hsl(222 44% 6%);
   --sidebar-foreground: hsl(210 40% 90%);
-  --sidebar-primary: hsl(176, 100%, 50%);
+  --sidebar-primary: hsl(183, 100%, 50%);
   --sidebar-primary-foreground: hsl(182, 100%, 3%);
   --sidebar-accent: hsl(222 30% 12%);
   --sidebar-accent-foreground: hsl(210 40% 90%);
   --sidebar-border: hsl(222 30% 15%);
-  --sidebar-ring: hsl(176, 100%, 50%);
+  --sidebar-ring: hsl(183, 100%, 50%);
 
   --gradient-primary: linear-gradient(
     180deg,
-    hsl(176, 100%, 10%),
-    hsl(176, 100%, 50%),
-    hsl(176, 100%, 50%)
+    hsl(183, 100%, 14%),
+    hsl(183, 100%, 50%),
+    hsl(183, 100%, 50%)
   );
   --gradient-hero: linear-gradient(
     180deg,
@@ -285,8 +285,14 @@ h6 {
   }
 
   .text-gradient-primary {
-    @apply text-transparent bg-clip-text;
-    background-image: var(--gradient-primary);
+    display: inline-block;
+    color: transparent;
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background: var(--gradient-primary);
+    background-repeat: no-repeat;
+    background-size: 100% 100%;
   }
 
   .glass-card {

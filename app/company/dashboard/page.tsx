@@ -13,13 +13,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/app/components/ui/tabs";
-import {
-  Building2,
-  KeyRound,
-  FileText,
-  Video,
-  BarChart3,
-} from "lucide-react";
+import { Building2, KeyRound, FileText, Video, BarChart3 } from "lucide-react";
 import { motion } from "framer-motion";
 import InviteCodeManager from "@/app/components/company/InviteCodeManager";
 import InterviewKitBuilder from "@/app/components/company/InterviewKitBuilder";
@@ -81,6 +75,12 @@ interface CompanySession {
   updated_at?: string;
 }
 
+interface CandidateProfileSummary {
+  user_id: string;
+  full_name: string;
+  resume_summary: string | null;
+}
+
 const CompanyDashboard = () => {
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
@@ -94,7 +94,7 @@ const CompanyDashboard = () => {
   const [kits, setKits] = useState<InterviewKit[]>([]);
   const [sessions, setSessions] = useState<CompanySession[]>([]);
   const [candidateProfiles, setCandidateProfiles] = useState<
-    { user_id: string; full_name: string }[]
+    CandidateProfileSummary[]
   >([]);
   const [loading, setLoading] = useState(true);
   const [initialLoad, setInitialLoad] = useState(true);
@@ -360,7 +360,7 @@ const CompanyDashboard = () => {
         if (userIds.length > 0) {
           const { data: profilesData, error: profilesError } = await supabase
             .from("profiles")
-            .select("user_id, full_name")
+            .select("user_id, full_name, resume_summary")
             .in("user_id", userIds);
 
           if (profilesError) {

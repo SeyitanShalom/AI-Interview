@@ -2,13 +2,7 @@
 
 export const dynamic = "force-dynamic";
 
-import {
-  Suspense,
-  useState,
-  useEffect,
-  useCallback,
-  useRef,
-} from "react";
+import { Suspense, useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "@/lib/auth";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -147,6 +141,7 @@ const CandidateDashboardContent = () => {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [resumeSummary, setResumeSummary] = useState<string | null>(null);
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
   const [activeTab, setActiveTab] = useState("practice");
   const [answerTranscript, setAnswerTranscript] = useState("");
@@ -238,6 +233,24 @@ const CandidateDashboardContent = () => {
       if (data) setSessions(data as unknown as Session[]);
     };
     loadSessions();
+  }, [user, step]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const loadProfileSummary = async () => {
+      const { data } = await supabase
+        .from("profiles")
+        .select("resume_summary")
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (data && typeof data.resume_summary === "string") {
+        setResumeSummary(data.resume_summary.trim());
+      }
+    };
+
+    loadProfileSummary();
   }, [user, step]);
 
   useEffect(() => {
@@ -659,8 +672,7 @@ const CandidateDashboardContent = () => {
       setStep("feedback");
     } catch (e: unknown) {
       toast.error("Error", {
-        description:
-          e instanceof Error ? e.message : "Failed to submit answer",
+        description: e instanceof Error ? e.message : "Failed to submit answer",
       });
       setStep("interview");
     }
@@ -738,8 +750,8 @@ const CandidateDashboardContent = () => {
     <div className="relative min-h-screen overflow-hidden bg-background">
       {/* Ambient background */}
       <div className="fixed inset-0 pointer-events-none">
-        <div className="absolute top-0 right-1/4 w-[500px] h-[500px] bg-primary/[0.03] rounded-full blur-[120px]" />
-        <div className="absolute bottom-1/4 left-0 w-[400px] h-[400px] bg-primary/[0.02] rounded-full blur-[100px]" />
+        <div className="absolute top-0 right-1/4 w-125 h-125 bg-primary/3 rounded-full blur-[120px]" />
+        <div className="absolute bottom-1/4 left-0 w-100 h-100 bg-primary/2 rounded-full blur-[100px]" />
       </div>
 
       {/* Navbar */}
@@ -832,7 +844,7 @@ const CandidateDashboardContent = () => {
             <motion.div
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
-              className="flex items-center justify-between mb-6"
+              className="flex flex-col gap-4 mb-6 lg:flex-row lg:items-start lg:justify-between"
             >
               <div>
                 <h1 className="text-xl font-bold tracking-tight md:text-2xl font-display">
@@ -844,27 +856,42 @@ const CandidateDashboardContent = () => {
                     : "AI-powered mock interviews with real-time feedback"}
                 </p>
               </div>
-              <div className="flex items-center gap-3">
-                <Link href="/candidate/profile">
-                  <Button variant="outline" size="sm" className="gap-2">
-                    <UserCircle className="h-4 w-4" />
-                    Profile
-                  </Button>
-                </Link>
-                <TabsList className="p-1 border bg-secondary/30 backdrop-blur-sm border-border/30">
-                  <TabsTrigger
-                    value="practice"
-                    className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_0_16px_-4px_hsl(var(--primary)/0.4)] transition-all"
-                  >
-                    <Play className="w-4 h-4" /> Practice
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value="history"
-                    className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_0_16px_-4px_hsl(var(--primary)/0.4)] transition-all"
-                  >
-                    <History className="w-4 h-4" /> History
-                  </TabsTrigger>
-                </TabsList>
+              <div className="flex flex-col gap-3 lg:items-end">
+                <div className="flex items-center gap-3">
+                  <Link href="/candidate/profile">
+                    <Button variant="outline" size="sm" className="gap-2">
+                      <UserCircle className="w-4 h-4" />
+                      Profile
+                    </Button>
+                  </Link>
+                  <TabsList className="p-1 border bg-secondary/30 backdrop-blur-sm border-border/30">
+                    <TabsTrigger
+                      value="practice"
+                      className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_0_16px_-4px_hsl(var(--primary)/0.4)] transition-all"
+                    >
+                      <Play className="w-4 h-4" /> Practice
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="history"
+                      className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_0_16px_-4px_hsl(var(--primary)/0.4)] transition-all"
+                    >
+                      <History className="w-4 h-4" /> History
+                    </TabsTrigger>
+                  </TabsList>
+                </div>
+
+                {resumeSummary ? (
+                  <div className="max-w-2xl rounded-2xl border border-border/40 bg-secondary/20 px-4 py-3 text-sm text-foreground shadow-sm">
+                    <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      Resume summary
+                    </p>
+                    <p className="leading-6 text-foreground">{resumeSummary}</p>
+                  </div>
+                ) : (
+                  <div className="max-w-2xl rounded-2xl border border-dashed border-border/40 bg-secondary/10 px-4 py-3 text-sm text-muted-foreground">
+                    Upload a resume in Profile to generate a summary.
+                  </div>
+                )}
               </div>
             </motion.div>
 
@@ -895,20 +922,20 @@ const CandidateDashboardContent = () => {
                       </CardHeader>
                       <CardContent className="space-y-4">
                         {kitLoading && (
-                          <div className="flex items-center gap-2 rounded-xl border border-border/50 bg-secondary/30 px-4 py-3 text-sm text-muted-foreground">
+                          <div className="flex items-center gap-2 px-4 py-3 text-sm border rounded-xl border-border/50 bg-secondary/30 text-muted-foreground">
                             <Loader2 className="w-4 h-4 animate-spin" />
                             Loading interview kit...
                           </div>
                         )}
 
                         {kitError && (
-                          <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                          <div className="px-4 py-3 text-sm border rounded-xl border-destructive/30 bg-destructive/10 text-destructive">
                             {kitError}
                           </div>
                         )}
 
                         {linkedKit && (
-                          <div className="rounded-xl border border-primary/20 bg-primary/10 px-4 py-3">
+                          <div className="px-4 py-3 border rounded-xl border-primary/20 bg-primary/10">
                             <div className="flex items-start gap-3">
                               <FileText className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
                               <div>
@@ -1058,14 +1085,16 @@ const CandidateDashboardContent = () => {
                       <Button
                         onClick={
                           linkedKit &&
-                          activeKitQuestionIndex < linkedKit.questions.length - 1
+                          activeKitQuestionIndex <
+                            linkedKit.questions.length - 1
                             ? handleNextKitQuestion
                             : resetToSetup
                         }
                         className="gap-2 bg-linear-to-r from-primary to-primary-glow hover:opacity-90"
                       >
                         {linkedKit &&
-                        activeKitQuestionIndex < linkedKit.questions.length - 1 ? (
+                        activeKitQuestionIndex <
+                          linkedKit.questions.length - 1 ? (
                           <>
                             <ArrowRight className="w-4 h-4" /> Next Question
                           </>
@@ -1097,7 +1126,7 @@ const CandidateDashboardContent = () => {
 };
 
 const DashboardFallback = () => (
-  <div className="flex min-h-screen items-center justify-center bg-background">
+  <div className="flex items-center justify-center min-h-screen bg-background">
     <div className="relative">
       <div className="w-12 h-12 border-2 rounded-full border-primary/30 border-t-primary animate-spin" />
       <div className="absolute inset-0 w-12 h-12 rounded-full animate-pulse-glow bg-primary/10" />
