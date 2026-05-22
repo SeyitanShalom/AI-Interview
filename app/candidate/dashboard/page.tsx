@@ -474,6 +474,64 @@ const CandidateDashboardContent = () => {
     }
   }, []);
 
+  const getMediaAccessHint = useCallback(async () => {
+    if (typeof window === "undefined") return "";
+
+    const hints: string[] = [];
+
+    if (!window.isSecureContext) {
+      hints.push(
+        "Open the app from http://localhost:3000 or an HTTPS URL. Browsers block camera prompts on regular network/IP addresses.",
+      );
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      hints.push(
+        "This browser does not expose camera/microphone recording for this page.",
+      );
+      return hints.join(" ");
+    }
+
+    if (!navigator.permissions?.query) {
+      return hints.join(" ");
+    }
+
+    const permissionLabels: Record<string, string> = {
+      camera: "Camera",
+      microphone: "Microphone",
+    };
+
+    const permissionStates = await Promise.all(
+      (["camera", "microphone"] as const).map(async (name) => {
+        try {
+          const status = await navigator.permissions.query({
+            name,
+          } as PermissionDescriptor);
+          return { name, state: status.state };
+        } catch {
+          return null;
+        }
+      }),
+    );
+
+    const deniedPermissions = permissionStates
+      .filter(
+        (
+          permission,
+        ): permission is { name: "camera" | "microphone"; state: PermissionState } =>
+          Boolean(permission && permission.state === "denied"),
+      )
+      .map((permission) => permissionLabels[permission.name]);
+
+    if (deniedPermissions.length > 0) {
+      hints.push(
+        `${deniedPermissions.join(" and ")} permission is blocked for this site. Use the browser address-bar site settings to allow it, then refresh.`,
+      );
+    }
+
+    return hints.join(" ");
+  }, []);
+
   const startInterview = useCallback(async () => {
     setIsGenerating(true);
     try {
@@ -590,7 +648,10 @@ const CandidateDashboardContent = () => {
         stream = await recorder.startCamera();
         setMediaUnavailableMessage(null);
       } catch (error) {
-        const message = normalizeErrorMessage(error);
+        const hint = await getMediaAccessHint();
+        const message = [normalizeErrorMessage(error), hint]
+          .filter(Boolean)
+          .join(" ");
         setMediaUnavailableMessage(message);
         toast.error("Recording unavailable", {
           description: message,
@@ -938,7 +999,7 @@ const CandidateDashboardContent = () => {
         </div>
       </nav> */}
 
-      <div className="container relative z-10 max-w-5xl px-6 py-8 mx-auto mt-28">
+      <div className="container relative z-10 max-w-5xl px-6 py-10 mx-auto mt-28">
         {/* Past session feedback view */}
         {selectedSession && (
           <motion.div
@@ -1038,14 +1099,14 @@ const CandidateDashboardContent = () => {
                 </div>
 
                 {resumeSummary ? (
-                  <div className="max-w-2xl rounded-2xl border border-border/40 bg-secondary/20 px-4 py-3 text-sm text-foreground shadow-sm">
+                  <div className="max-w-2xl px-4 py-3 text-sm border shadow-sm rounded-2xl border-border/40 bg-secondary/20 text-foreground">
                     <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                       Resume summary
                     </p>
                     <p className="leading-6 text-foreground">{resumeSummary}</p>
                   </div>
                 ) : (
-                  <div className="max-w-2xl rounded-2xl border border-dashed border-border/40 bg-secondary/10 px-4 py-3 text-sm text-muted-foreground">
+                  <div className="max-w-2xl px-4 py-3 text-sm border border-dashed rounded-2xl border-border/40 bg-secondary/10 text-muted-foreground">
                     Upload a resume in Profile to generate a summary.
                   </div>
                 )}
@@ -1187,7 +1248,7 @@ const CandidateDashboardContent = () => {
                     />
 
                     {mediaUnavailableMessage && !recorder.stream && (
-                      <div className="mx-auto max-w-3xl rounded-xl border border-yellow-500/30 bg-yellow-500/10 p-4 text-sm text-foreground">
+                      <div className="max-w-3xl p-4 mx-auto text-sm border rounded-xl border-yellow-500/30 bg-yellow-500/10 text-foreground">
                         <p className="font-medium">Recording needs permission</p>
                         <p className="mt-1 text-muted-foreground">
                           {mediaUnavailableMessage}
@@ -1195,7 +1256,7 @@ const CandidateDashboardContent = () => {
                       </div>
                     )}
 
-                    <div className="mx-auto max-w-3xl space-y-2 rounded-xl border border-border/50 bg-secondary/20 p-4">
+                    <div className="max-w-3xl p-4 mx-auto space-y-2 border rounded-xl border-border/50 bg-secondary/20">
                       <div className="flex items-center justify-between gap-3">
                         <label
                           htmlFor="answer-transcript"
@@ -1221,7 +1282,7 @@ const CandidateDashboardContent = () => {
                           }
                         }}
                         placeholder="Type your answer here or edit the generated transcript before submitting."
-                        className="min-h-32 resize-y bg-background/70"
+                        className="resize-y min-h-32 bg-background/70"
                       />
                       {transcriptionError ? (
                         <p className="text-xs text-destructive">

@@ -258,7 +258,7 @@ const ForCandidates = () => {
         </div>
       </section>
 
-      <Footer />
+      {/* <Footer /> */}
     </div>
   );
 };

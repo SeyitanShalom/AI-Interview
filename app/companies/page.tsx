@@ -256,7 +256,7 @@ const ForCompanies = () => {
         </div>
       </section>
 
-      <Footer />
+      {/* <Footer /> */}
     </div>
   );
 };

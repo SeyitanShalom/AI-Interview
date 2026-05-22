@@ -14,7 +14,7 @@ const Hero = () => {
       {/* <div className="absolute bottom-0 left-0 right-0 h-px bg-linear-to-r from-transparent via-primary/20 to-transparent" /> */}
 
       {/* Dot grid pattern */}
-      <div className="absolute inset-0 bg-[radial-gradient(hsl(183_100%_50%/0.15)_1px,transparent_1px)] bg-size-[22px_22px]" />
+      <div className="absolute inset-0 bg-[radial-gradient(hsl(183_100%_50%/0.1)_1px,transparent_1px)] bg-size-[22px_22px]" />
 
       <div className="container relative z-10 px-6 mx-auto text-center ">
         {/* Badge */}
