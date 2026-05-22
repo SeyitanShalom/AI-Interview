@@ -7,13 +7,9 @@ import { useAuth } from "@/lib/auth";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
-import {
-  FunctionsHttpError,
-  FunctionsRelayError,
-  FunctionsFetchError,
-} from "@supabase/supabase-js";
 import { toast } from "sonner";
 import { Button } from "@/app/components/ui/button";
+import { Textarea } from "@/app/components/ui/textarea";
 import {
   Card,
   CardContent,
@@ -122,7 +118,63 @@ type LocalTranscriptionPayload = {
   engine?: string;
 };
 
-const MIN_TRANSCRIPT_WORDS = 20;
+const countWords = (value: string) =>
+  value.trim().split(/\s+/).filter(Boolean).length;
+
+const clampScore = (value: number) =>
+  Math.max(0, Math.min(100, Math.round(value)));
+
+const buildFallbackFeedback = (
+  jobRole: string,
+  question: string,
+  transcript: string,
+): Feedback => {
+  const words = countWords(transcript);
+  const hasTranscript = words > 0;
+
+  const content = clampScore(
+    hasTranscript ? 45 + Math.min(words * 0.28, 35) : 45,
+  );
+  const structure = clampScore(
+    hasTranscript ? 42 + Math.min(words * 0.24, 35) : 44,
+  );
+  const clarity = clampScore(
+    hasTranscript ? 50 + Math.min(words * 0.18, 30) : 50,
+  );
+  const impact = clampScore(
+    hasTranscript ? 38 + Math.min(words * 0.3, 38) : 40,
+  );
+  const confidence = clampScore(
+    hasTranscript ? 52 + Math.min(words * 0.16, 28) : 52,
+  );
+  const contentScore = clampScore(
+    content * 0.5 + structure * 0.3 + impact * 0.2,
+  );
+  const styleScore = clampScore(clarity * 0.6 + confidence * 0.4);
+  const overallScore = clampScore(contentScore * 0.6 + styleScore * 0.4);
+
+  return {
+    rubric_scores: { content, structure, clarity, impact, confidence },
+    content_score: contentScore,
+    style_score: styleScore,
+    overall_score: overallScore,
+    summary:
+      "Baseline feedback was generated from the available transcript. Add more detail, evidence, and outcomes to make the assessment sharper.",
+    strengths: [
+      "Your response stayed aligned with the interview prompt.",
+      "You provided enough context to begin evaluating the answer.",
+      "You showed a willingness to explain your approach.",
+    ],
+    improvements: [
+      "Use the STAR format to make the answer easier to follow.",
+      "Add concrete results, metrics, or examples of impact.",
+      "Close with one concise takeaway tied to the role.",
+    ],
+    content_analysis: `Role: ${jobRole}. Question analyzed: ${question}. The transcript supports a baseline review; stronger examples and measurable outcomes would improve the content score.`,
+    style_analysis:
+      "Aim for confident pacing, clear sentence structure, and a direct closing statement.",
+  };
+};
 
 const CandidateDashboardContent = () => {
   const { user } = useAuth();
@@ -145,10 +197,19 @@ const CandidateDashboardContent = () => {
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
   const [activeTab, setActiveTab] = useState("practice");
   const [answerTranscript, setAnswerTranscript] = useState("");
+  const [mediaUnavailableMessage, setMediaUnavailableMessage] = useState<
+    string | null
+  >(null);
+  const [transcriptionError, setTranscriptionError] = useState<string | null>(
+    null,
+  );
+  const [isSubmittingAnswer, setIsSubmittingAnswer] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const [transcriptionMode, setTranscriptionMode] = useState<
     "browser-stt" | "local-whisper"
   >("local-whisper");
   const speechRecognitionRef = useRef<SpeechRecognitionInstance | null>(null);
+  const manualTranscriptEditedRef = useRef(false);
 
   const normalizeErrorMessage = useCallback((e: unknown) => {
     if (e instanceof Error) return e.message;
@@ -378,11 +439,20 @@ const CandidateDashboardContent = () => {
         )
         .join(" ")
         .trim();
-      setAnswerTranscript(combinedTranscript);
+      if (!manualTranscriptEditedRef.current) {
+        setAnswerTranscript(combinedTranscript);
+      }
+      if (combinedTranscript) {
+        setTranscriptionError(null);
+      }
     };
 
-    recognition.onerror = () => {
-      // Keep the interview running even if speech recognition fails.
+    recognition.onerror = (event: BrowserSpeechRecognitionErrorEvent) => {
+      const message =
+        event.error === "not-allowed"
+          ? "Browser transcription needs microphone permission."
+          : "Browser transcription stopped. The recording can still be transcribed after submission.";
+      setTranscriptionError(message);
     };
 
     speechRecognitionRef.current = recognition;
@@ -440,32 +510,8 @@ const CandidateDashboardContent = () => {
             throw new Error("No interview question returned from AI provider");
           }
         } catch (e: unknown) {
+          console.warn("AI question generation failed; using backup question.", e);
           question = getBackupQuestion(jobRole);
-
-          if (e instanceof FunctionsHttpError && e.context.status === 429) {
-            toast.warning("Rate limit reached", {
-              description:
-                "AI quota is exhausted, so we started with a backup question.",
-            });
-          } else if (e instanceof FunctionsHttpError) {
-            toast.warning("AI temporarily unavailable", {
-              description:
-                "Started with a backup question so you can continue practicing.",
-            });
-          } else if (
-            e instanceof FunctionsRelayError ||
-            e instanceof FunctionsFetchError
-          ) {
-            toast.warning("Network issue detected", {
-              description:
-                "Started with a backup question while AI service reconnects.",
-            });
-          } else {
-            toast.warning("AI unavailable", {
-              description:
-                "Started with a backup question so your interview is not blocked.",
-            });
-          }
         }
       }
 
@@ -505,17 +551,13 @@ const CandidateDashboardContent = () => {
       setCurrentQuestion(question);
       setCurrentSessionId(session.id);
 
-      const stream = await recorder.startCamera();
-      if (!stream) {
-        throw new Error(
-          recorder.error ||
-            "Camera access denied. Please allow camera and microphone access.",
-        );
-      }
-
       setAnswerTranscript("");
+      manualTranscriptEditedRef.current = false;
+      setMediaUnavailableMessage(null);
+      setTranscriptionError(null);
       setStep("interview");
     } catch (e: unknown) {
+      recorder.stopCamera();
       const message = normalizeErrorMessage(e);
       const userMessage = toUserFriendlyStartError(message);
       console.error("Failed to start interview:", {
@@ -540,10 +582,42 @@ const CandidateDashboardContent = () => {
     activeKitQuestionIndex,
   ]);
 
-  const handleStartRecording = () => {
-    if (recorder.stream) {
-      recorder.startRecording(recorder.stream);
+  const handleStartRecording = async () => {
+    let stream = recorder.stream;
+
+    if (!stream) {
+      try {
+        stream = await recorder.startCamera();
+        setMediaUnavailableMessage(null);
+      } catch (error) {
+        const message = normalizeErrorMessage(error);
+        setMediaUnavailableMessage(message);
+        toast.error("Recording unavailable", {
+          description: message,
+        });
+        return;
+      }
+    }
+
+    if (!stream) {
+      toast.error("Recording unavailable", {
+        description:
+          mediaUnavailableMessage ||
+          recorder.error ||
+          "Camera and microphone access is not available.",
+      });
+      return;
+    }
+
+    setTranscriptionError(null);
+    const started = recorder.startRecording(stream);
+    if (started) {
       startSpeechRecognition();
+    } else {
+      toast.error("Recording unavailable", {
+        description:
+          recorder.error || "Recording could not start in this browser.",
+      });
     }
   };
 
@@ -585,102 +659,179 @@ const CandidateDashboardContent = () => {
   }, []);
 
   const handleSubmitAnswer = async () => {
-    if (!recorder.recordedBlob || !currentSessionId) return;
-
-    let transcriptForFeedback = answerTranscript.trim();
-
-    if (!transcriptForFeedback) {
-      try {
-        const localResult = await transcribeWithLocalWhisper(
-          recorder.recordedBlob,
-        );
-        const localTranscript = localResult.text;
-        if (localTranscript) {
-          transcriptForFeedback = localTranscript;
-          setAnswerTranscript(localTranscript);
-          toast.success("Transcript generated", {
-            description: "Local Whisper transcription completed.",
-          });
-        }
-      } catch (transcriptionError) {
-        console.warn("Local Whisper transcription failed:", transcriptionError);
-      }
+    if (!currentSessionId || isSubmittingAnswer) {
+      return;
     }
 
-    const wordCount = transcriptForFeedback.split(/\s+/).filter(Boolean).length;
-    if (!transcriptForFeedback) {
-      toast.error("Transcript required", {
-        description:
-          "I couldn't detect enough speech in your recording to generate accurate feedback. Please record again and speak clearly.",
+    if (!user?.id) {
+      toast.error("Error", {
+        description: "You are not signed in. Please sign in and try again.",
       });
       return;
     }
 
-    if (wordCount < MIN_TRANSCRIPT_WORDS) {
-      toast.error("Transcript too short", {
-        description: `Please speak for at least ${MIN_TRANSCRIPT_WORDS} words so the feedback can be based on the recorded answer.`,
-      });
-      return;
-    }
-
-    setStep("analyzing");
+    setIsSubmittingAnswer(true);
+    setTranscriptionError(null);
 
     try {
-      const filePath = `${user!.id}/${currentSessionId}.webm`;
-      const { error: uploadError } = await supabase.storage
-        .from("interview-recordings")
-        .upload(filePath, recorder.recordedBlob, {
-          contentType: "video/webm",
-          upsert: true,
-          cacheControl: "0",
-        });
-      if (uploadError) {
-        throw new Error(uploadError.message || "Failed to upload recording");
+      let transcriptForFeedback = answerTranscript.trim();
+
+      if (!transcriptForFeedback && recorder.recordedBlob) {
+        setIsTranscribing(true);
+        try {
+          const localResult = await transcribeWithLocalWhisper(
+            recorder.recordedBlob,
+          );
+          const localTranscript = localResult.text;
+          if (localTranscript) {
+            transcriptForFeedback = localTranscript;
+            setAnswerTranscript(localTranscript);
+            toast.success("Transcript generated", {
+              description: "Your recording was transcribed successfully.",
+            });
+          }
+        } catch (transcriptionError) {
+          console.warn(
+            "Automatic transcription failed:",
+            transcriptionError,
+          );
+          setTranscriptionError(
+            "Automatic transcription could not produce text. Add the transcript below and submit again.",
+          );
+          toast.error("Transcript needed", {
+            description:
+              "Automatic transcription did not return speech text. Add the transcript below and submit again.",
+          });
+          return;
+        } finally {
+          setIsTranscribing(false);
+        }
       }
 
-      const { data: urlData } = supabase.storage
-        .from("interview-recordings")
-        .getPublicUrl(filePath);
+      if (!transcriptForFeedback) {
+        setTranscriptionError(
+          "Add the transcript below so feedback can be generated.",
+        );
+        toast.error("Transcript needed", {
+          description: "Add the transcript below and submit again.",
+        });
+        return;
+      }
 
-      await supabase
-        .from("interview_sessions")
-        .update({ video_url: urlData.publicUrl })
-        .eq("id", currentSessionId);
+      setStep("analyzing");
 
-      const { data, error } = await supabase.functions.invoke(
-        "interview-feedback",
-        {
-          body: {
-            sessionId: currentSessionId,
-            jobRole,
-            question: currentQuestion,
-            transcript: transcriptForFeedback,
+      if (recorder.recordedBlob) {
+        const filePath = `${user.id}/${currentSessionId}.webm`;
+        try {
+          const { error: uploadError } = await supabase.storage
+            .from("interview-recordings")
+            .upload(filePath, recorder.recordedBlob, {
+              contentType: recorder.recordedBlob.type || "video/webm",
+              upsert: true,
+              cacheControl: "0",
+            });
+          if (uploadError) {
+            throw new Error(uploadError.message || "Failed to upload recording");
+          }
+
+          const { data: urlData } = supabase.storage
+            .from("interview-recordings")
+            .getPublicUrl(filePath);
+
+          const { error: updateVideoError } = await supabase
+            .from("interview_sessions")
+            .update({ video_url: urlData.publicUrl })
+            .eq("id", currentSessionId);
+
+          if (updateVideoError) {
+            console.warn("Recording URL update failed:", updateVideoError);
+          }
+        } catch (uploadError) {
+          console.warn("Recording upload failed:", uploadError);
+          toast.warning("Recording upload skipped", {
+            description:
+              "Feedback will still be generated, but this session may not include video playback.",
+          });
+        }
+      }
+
+      let nextFeedback: Feedback | null = null;
+      let usedFallbackFeedback = false;
+
+      try {
+        const { data, error } = await supabase.functions.invoke(
+          "interview-feedback",
+          {
+            body: {
+              sessionId: currentSessionId,
+              jobRole,
+              question: currentQuestion,
+              transcript: transcriptForFeedback,
+            },
           },
-        },
-      );
+        );
 
-      if (error) throw error;
+        if (error) throw error;
 
-      if (data?.usedFallback) {
-        toast.warning("Using fallback feedback", {
+        if (!data?.feedback) {
+          throw new Error("No feedback returned from AI provider");
+        }
+
+        nextFeedback = data.feedback as Feedback;
+        usedFallbackFeedback = Boolean(data.usedFallback);
+      } catch (feedbackError) {
+        console.warn("Feedback function failed; using baseline feedback.", {
+          error: feedbackError,
+        });
+        nextFeedback = buildFallbackFeedback(
+          jobRole,
+          currentQuestion,
+          transcriptForFeedback,
+        );
+        usedFallbackFeedback = true;
+
+        const { error: updateFeedbackError } = await supabase
+          .from("interview_sessions")
+          .update({
+            ai_feedback: nextFeedback,
+            content_score: nextFeedback.content_score,
+            style_score: nextFeedback.style_score,
+            overall_score: nextFeedback.overall_score,
+            status: "completed",
+            completed_at: new Date().toISOString(),
+          })
+          .eq("id", currentSessionId);
+
+        if (updateFeedbackError) {
+          console.warn("Fallback feedback save failed:", updateFeedbackError);
+        }
+      }
+
+      if (usedFallbackFeedback) {
+        toast.warning("Using baseline feedback", {
           description:
-            "AI feedback could not be generated for this submission, so a baseline analysis was used.",
+            "AI feedback was unavailable, so a local rubric was used for this submission.",
         });
       }
 
-      setFeedback(data.feedback);
+      setFeedback(nextFeedback);
       setStep("feedback");
     } catch (e: unknown) {
       toast.error("Error", {
         description: e instanceof Error ? e.message : "Failed to submit answer",
       });
       setStep("interview");
+    } finally {
+      setIsTranscribing(false);
+      setIsSubmittingAnswer(false);
     }
   };
 
   const handleRetake = () => {
     recorder.resetRecording();
     setAnswerTranscript("");
+    manualTranscriptEditedRef.current = false;
+    setTranscriptionError(null);
   };
 
   const resetToSetup = () => {
@@ -693,6 +844,9 @@ const CandidateDashboardContent = () => {
     setCurrentQuestion("");
     setSelectedSession(null);
     setAnswerTranscript("");
+    manualTranscriptEditedRef.current = false;
+    setMediaUnavailableMessage(null);
+    setTranscriptionError(null);
   };
 
   const handleNextKitQuestion = () => {
@@ -706,6 +860,9 @@ const CandidateDashboardContent = () => {
     setCurrentQuestion("");
     setSelectedSession(null);
     setAnswerTranscript("");
+    manualTranscriptEditedRef.current = false;
+    setMediaUnavailableMessage(null);
+    setTranscriptionError(null);
     setActiveKitQuestionIndex((index) =>
       Math.min(index + 1, linkedKit.questions.length - 1),
     );
@@ -1003,9 +1160,11 @@ const CandidateDashboardContent = () => {
                   >
                     <div className="flex justify-center">
                       <span className="px-3 py-1 text-xs border rounded-full border-border/50 bg-secondary/40 text-muted-foreground">
-                        {transcriptionMode === "browser-stt"
-                          ? "Transcription: Browser STT"
-                          : "Transcription: Local Whisper"}
+                        {mediaUnavailableMessage
+                          ? "Response: Text transcript"
+                          : transcriptionMode === "browser-stt"
+                            ? "Recording: Video/audio + browser transcript"
+                            : "Recording: Video/audio + local transcript"}
                       </span>
                     </div>
 
@@ -1027,6 +1186,54 @@ const CandidateDashboardContent = () => {
                       onRetake={handleRetake}
                     />
 
+                    {mediaUnavailableMessage && !recorder.stream && (
+                      <div className="mx-auto max-w-3xl rounded-xl border border-yellow-500/30 bg-yellow-500/10 p-4 text-sm text-foreground">
+                        <p className="font-medium">Recording needs permission</p>
+                        <p className="mt-1 text-muted-foreground">
+                          {mediaUnavailableMessage}
+                        </p>
+                      </div>
+                    )}
+
+                    <div className="mx-auto max-w-3xl space-y-2 rounded-xl border border-border/50 bg-secondary/20 p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <label
+                          htmlFor="answer-transcript"
+                          className="text-sm font-medium text-foreground"
+                        >
+                          Text answer / transcript
+                        </label>
+                        {isTranscribing && (
+                          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            Transcribing...
+                          </span>
+                        )}
+                      </div>
+                      <Textarea
+                        id="answer-transcript"
+                        value={answerTranscript}
+                        onChange={(event) => {
+                          manualTranscriptEditedRef.current = true;
+                          setAnswerTranscript(event.target.value);
+                          if (transcriptionError) {
+                            setTranscriptionError(null);
+                          }
+                        }}
+                        placeholder="Type your answer here or edit the generated transcript before submitting."
+                        className="min-h-32 resize-y bg-background/70"
+                      />
+                      {transcriptionError ? (
+                        <p className="text-xs text-destructive">
+                          {transcriptionError}
+                        </p>
+                      ) : answerTranscript.trim() ? (
+                        <p className="text-xs text-muted-foreground">
+                          {countWords(answerTranscript)} words captured.
+                        </p>
+                      ) : null}
+                    </div>
+
                     <div className="flex justify-center gap-3">
                       <Button
                         variant="outline"
@@ -1035,12 +1242,23 @@ const CandidateDashboardContent = () => {
                       >
                         Cancel
                       </Button>
-                      {recorder.recordedUrl && (
+                      {!recorder.isRecording &&
+                        (recorder.recordedUrl || answerTranscript.trim()) && (
                         <Button
                           onClick={handleSubmitAnswer}
+                          disabled={isSubmittingAnswer}
                           className="gap-2 bg-linear-to-r from-primary to-primary-glow hover:opacity-90 shadow-[0_0_20px_-4px_hsl(var(--primary)/0.4)]"
                         >
-                          <Send className="w-4 h-4" /> Submit for Feedback
+                          {isSubmittingAnswer ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              {isTranscribing ? "Transcribing..." : "Submitting..."}
+                            </>
+                          ) : (
+                            <>
+                              <Send className="w-4 h-4" /> Submit for Feedback
+                            </>
+                          )}
                         </Button>
                       )}
                     </div>

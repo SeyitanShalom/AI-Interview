@@ -290,17 +290,6 @@ DenoRuntime.serve(async (req: Request) => {
       .split(/\s+/)
       .filter(Boolean).length;
 
-    if (transcriptWordCount < MIN_TRANSCRIPT_WORDS) {
-      return jsonResponse(
-        {
-          error: `I couldn't hear enough speech in the recording to score it accurately. Please record again and speak more clearly. Minimum words: ${MIN_TRANSCRIPT_WORDS}.`,
-          minWords: MIN_TRANSCRIPT_WORDS,
-          actualWords: transcriptWordCount,
-        },
-        422,
-      );
-    }
-
     const geminiKey = DenoRuntime.env.get("GEMINI_API_KEY");
     const geminiModel =
       DenoRuntime.env.get("GEMINI_MODEL") || "gemini-2.0-flash";
@@ -312,7 +301,7 @@ DenoRuntime.serve(async (req: Request) => {
     );
     let usedFallback = true;
 
-    if (geminiKey) {
+    if (geminiKey && transcriptWordCount >= MIN_TRANSCRIPT_WORDS) {
       const geminiRes = await callGeminiFeedback(
         geminiKey,
         geminiModel,
@@ -339,7 +328,15 @@ DenoRuntime.serve(async (req: Request) => {
 
     await updateSessionFeedback(req, sessionId, feedback);
 
-    return jsonResponse({ feedback, usedFallback }, 200);
+    return jsonResponse(
+      {
+        feedback,
+        usedFallback,
+        minProviderWords: MIN_TRANSCRIPT_WORDS,
+        transcriptWordCount,
+      },
+      200,
+    );
   } catch (e: unknown) {
     return jsonResponse(
       { error: e instanceof Error ? e.message : "Unknown server error" },

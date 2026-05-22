@@ -47,6 +47,20 @@ async function callGemini(model: string, key: string, prompt: string) {
   );
 }
 
+function getBackupQuestion(role: string) {
+  const normalizedRole = role.trim() || "Software Engineer";
+  const templates = [
+    "Describe a complex problem you solved as a {role}. What options did you consider and why did you choose your final approach?",
+    "Tell me about a time you had to deliver results as a {role} under a tight deadline. How did you prioritize?",
+    "As a {role}, how would you handle disagreement with a teammate about implementation strategy?",
+    "Share an example of feedback you received while working as a {role}. What changed afterward?",
+    "What is one project where your impact as a {role} was measurable? Walk me through your specific contributions.",
+  ];
+
+  const index = Math.floor(Math.random() * templates.length);
+  return templates[index].replace("{role}", normalizedRole);
+}
+
 DenoRuntime.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -59,9 +73,12 @@ DenoRuntime.serve(async (req: Request) => {
     });
   }
 
+  let requestedJobRole = "Software Engineer";
+
   try {
     const { jobRole = "Software Engineer", previousQuestions = [] } =
       (await req.json()) as RequestBody;
+    requestedJobRole = jobRole;
 
     const GEMINI_API_KEY = DenoRuntime.env.get("GEMINI_API_KEY");
     const GEMINI_MODEL =
@@ -69,9 +86,13 @@ DenoRuntime.serve(async (req: Request) => {
 
     if (!GEMINI_API_KEY) {
       return new Response(
-        JSON.stringify({ error: "GEMINI_API_KEY not configured" }),
+        JSON.stringify({
+          question: getBackupQuestion(jobRole),
+          usedFallback: true,
+          reason: "GEMINI_API_KEY not configured",
+        }),
         {
-          status: 500,
+          status: 200,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         },
       );
@@ -112,14 +133,16 @@ Return only the question text.
       const details = aiRes ? await aiRes.text() : "No response";
       return new Response(
         JSON.stringify({
-          error: "AI provider error",
+          question: getBackupQuestion(jobRole),
+          usedFallback: true,
+          reason: "AI provider error",
           status: aiRes?.status ?? 500,
           modelUsed,
           modelsTried: modelsToTry,
           details,
         }),
         {
-          status: aiRes?.status ?? 500,
+          status: 200,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         },
       );
@@ -137,10 +160,12 @@ Return only the question text.
   } catch (e: unknown) {
     return new Response(
       JSON.stringify({
-        error: e instanceof Error ? e.message : "Unknown server error",
+        question: getBackupQuestion(requestedJobRole),
+        usedFallback: true,
+        reason: e instanceof Error ? e.message : "Unknown server error",
       }),
       {
-        status: 500,
+        status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       },
     );

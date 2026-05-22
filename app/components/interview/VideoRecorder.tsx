@@ -46,14 +46,24 @@ const VideoRecorder = ({
           className="w-full h-full object-cover"
         />
       ) : (
-        <video
-          ref={videoRef}
-          autoPlay
-          muted
-          playsInline
-          className="w-full h-full object-cover mirror"
-          style={{ transform: "scaleX(-1)" }}
-        />
+        <>
+          <video
+            ref={videoRef}
+            autoPlay
+            muted
+            playsInline
+            className="w-full h-full object-cover mirror"
+            style={{ transform: "scaleX(-1)" }}
+          />
+          {!stream && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black">
+              <div className="flex flex-col items-center gap-2 text-center text-white/75">
+                <Video className="h-8 w-8" />
+                <span className="text-sm">Camera preview will appear here</span>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {/* Recording indicator */}
@@ -79,7 +89,8 @@ const VideoRecorder = ({
               size="lg"
               className="rounded-xl gap-2 bg-destructive hover:bg-destructive/90 text-white shadow-[0_0_20px_-4px_hsl(var(--destructive)/0.5)]"
             >
-              <Video className="w-5 h-5" /> Start Recording
+              <Video className="w-5 h-5" />{" "}
+              {stream ? "Start Recording" : "Enable Camera"}
             </Button>
           ) : (
             <Button

@@ -130,7 +130,7 @@ const CandidateProfile = () => {
   };
 
   return (
-    <div className="min-h-screen px-6 py-12 bg-background">
+    <div className="min-h-screen px-6 py-20 bg-background">
       <div className="max-w-2xl mx-auto">
         <Button
           variant="ghost"
@@ -140,8 +140,8 @@ const CandidateProfile = () => {
           <ArrowLeft className="w-4 h-4" /> Back
         </Button>
 
-        <h1 className="text-2xl font-display mb-2">Profile</h1>
-        <p className="text-sm text-muted-foreground mb-6">
+        <h1 className="mb-2 text-2xl font-display">Profile</h1>
+        <p className="mb-6 text-sm text-muted-foreground">
           Manage your uploaded CV / resume.
         </p>
 
@@ -172,7 +172,7 @@ const CandidateProfile = () => {
                   href={resumeUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="text-primary underline"
+                  className="underline text-primary"
                 >
                   View resume
                 </a>
@@ -192,7 +192,7 @@ const CandidateProfile = () => {
               Resume Summary
             </label>
             {resumeSummary ? (
-              <div className="rounded-xl border border-border/50 bg-secondary/20 p-4 text-sm text-muted-foreground leading-6">
+              <div className="p-4 text-sm leading-6 border rounded-xl border-border/50 bg-secondary/20 text-muted-foreground">
                 {resumeSummary}
               </div>
             ) : (

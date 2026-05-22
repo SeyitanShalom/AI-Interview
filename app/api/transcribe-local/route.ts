@@ -16,6 +16,39 @@ type TranscriptionResult = {
   confidence?: number | null;
 };
 
+type ExecFileError = Error & {
+  stdout?: string | Buffer;
+  stderr?: string | Buffer;
+};
+
+function outputToString(output: string | Buffer | undefined) {
+  if (!output) return "";
+  return Buffer.isBuffer(output) ? output.toString("utf8") : output;
+}
+
+function getScriptErrorMessage(error: unknown) {
+  const execError = error as ExecFileError;
+  const output = [
+    outputToString(execError.stdout),
+    outputToString(execError.stderr),
+  ]
+    .join("\n")
+    .trim();
+
+  if (output) {
+    try {
+      const parsed = JSON.parse(output) as { error?: unknown };
+      if (typeof parsed.error === "string" && parsed.error) {
+        return parsed.error;
+      }
+    } catch {
+      return output;
+    }
+  }
+
+  return error instanceof Error ? error.message : String(error);
+}
+
 async function runWhisperScript(
   filePath: string,
   language: string,
@@ -65,7 +98,7 @@ async function runWhisperScript(
       const parsed = JSON.parse(stdout) as TranscriptionResult;
       return parsed;
     } catch (error) {
-      lastError = error instanceof Error ? error.message : String(error);
+      lastError = getScriptErrorMessage(error);
     }
   }
 
