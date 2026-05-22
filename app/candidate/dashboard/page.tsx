@@ -2,7 +2,14 @@
 
 export const dynamic = "force-dynamic";
 
-import { Suspense, useState, useEffect, useCallback, useRef } from "react";
+import {
+  Suspense,
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+} from "react";
 import { useAuth } from "@/lib/auth";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -80,6 +87,33 @@ interface InterviewKit {
   questions: string[];
 }
 
+type ProfileRecord = {
+  resume_summary?: string | null;
+  resume_roles?: string[] | null;
+  target_roles?: string[] | null;
+};
+
+const getErrorMessage = (error: unknown) => {
+  if (error instanceof Error) return error.message;
+
+  if (error && typeof error === "object") {
+    const maybeError = error as { message?: unknown; details?: unknown };
+    return [maybeError.message, maybeError.details]
+      .filter((part): part is string => typeof part === "string" && !!part)
+      .join(" ");
+  }
+
+  return typeof error === "string" ? error : "";
+};
+
+const isMissingProfileRoleColumn = (error: unknown) => {
+  const message = getErrorMessage(error).toLowerCase();
+  return (
+    message.includes("schema cache") &&
+    (message.includes("resume_roles") || message.includes("target_roles"))
+  );
+};
+
 interface BrowserSpeechRecognitionAlternative {
   transcript: string;
 }
@@ -123,6 +157,38 @@ const countWords = (value: string) =>
 
 const clampScore = (value: number) =>
   Math.max(0, Math.min(100, Math.round(value)));
+
+const normalizeRole = (value: unknown) => {
+  if (typeof value !== "string") return null;
+
+  const role = value
+    .replace(/[\u2022*]/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^[,.;:\-\s]+|[,.;:\-\s]+$/g, "")
+    .trim();
+
+  if (role.length < 2 || role.length > 80) return null;
+  return role;
+};
+
+const normalizeRoles = (values: unknown[]) => {
+  const seen = new Set<string>();
+  const roles: string[] = [];
+
+  for (const value of values) {
+    const role = normalizeRole(value);
+    if (!role) continue;
+
+    const key = role.toLowerCase();
+    if (seen.has(key)) continue;
+
+    seen.add(key);
+    roles.push(role);
+    if (roles.length >= 12) break;
+  }
+
+  return roles;
+};
 
 const buildFallbackFeedback = (
   jobRole: string,
@@ -194,6 +260,8 @@ const CandidateDashboardContent = () => {
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [resumeSummary, setResumeSummary] = useState<string | null>(null);
+  const [resumeRoles, setResumeRoles] = useState<string[]>([]);
+  const [targetRoles, setTargetRoles] = useState<string[]>([]);
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
   const [activeTab, setActiveTab] = useState("practice");
   const [answerTranscript, setAnswerTranscript] = useState("");
@@ -210,6 +278,12 @@ const CandidateDashboardContent = () => {
   >("local-whisper");
   const speechRecognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const manualTranscriptEditedRef = useRef(false);
+  const profileRoleInitializedRef = useRef(false);
+
+  const profileRoles = useMemo(
+    () => normalizeRoles([...targetRoles, ...resumeRoles]),
+    [resumeRoles, targetRoles],
+  );
 
   const normalizeErrorMessage = useCallback((e: unknown) => {
     if (e instanceof Error) return e.message;
@@ -299,20 +373,61 @@ const CandidateDashboardContent = () => {
   useEffect(() => {
     if (!user) return;
 
-    const loadProfileSummary = async () => {
-      const { data } = await supabase
+    const loadProfileContext = async () => {
+      const { data, error } = await supabase
         .from("profiles")
-        .select("resume_summary")
+        .select("resume_summary, resume_roles, target_roles")
         .eq("user_id", user.id)
         .maybeSingle();
+      let profile = data as ProfileRecord | null;
 
-      if (data && typeof data.resume_summary === "string") {
-        setResumeSummary(data.resume_summary.trim());
+      if (error) {
+        if (!isMissingProfileRoleColumn(error)) {
+          console.warn("Failed to load profile context", error);
+          return;
+        }
+
+        const { data: fallbackData, error: fallbackError } = await supabase
+          .from("profiles")
+          .select("resume_summary")
+          .eq("user_id", user.id)
+          .maybeSingle();
+
+        if (fallbackError) {
+          console.warn("Failed to load fallback profile context", fallbackError);
+          return;
+        }
+
+        profile = fallbackData as ProfileRecord | null;
+      }
+
+      const nextResumeSummary =
+        typeof profile?.resume_summary === "string"
+          ? profile.resume_summary.trim()
+          : null;
+      const nextResumeRoles = normalizeRoles(profile?.resume_roles ?? []);
+      const nextTargetRoles = normalizeRoles(profile?.target_roles ?? []);
+      const nextProfileRoles = normalizeRoles([
+        ...nextTargetRoles,
+        ...nextResumeRoles,
+      ]);
+
+      setResumeSummary(nextResumeSummary);
+      setResumeRoles(nextResumeRoles);
+      setTargetRoles(nextTargetRoles);
+
+      if (
+        !profileRoleInitializedRef.current &&
+        !kitId &&
+        nextProfileRoles.length > 0
+      ) {
+        setJobRole(nextProfileRoles[0]);
+        profileRoleInitializedRef.current = true;
       }
     };
 
-    loadProfileSummary();
-  }, [user, step]);
+    loadProfileContext();
+  }, [kitId, user, step]);
 
   useEffect(() => {
     let cancelled = false;
@@ -552,10 +667,26 @@ const CandidateDashboardContent = () => {
         }
       } else {
         try {
+          const normalizedJobRole = jobRole.trim().toLowerCase();
+          const previousQuestions = sessions
+            .filter(
+              (session) =>
+                session.job_role.trim().toLowerCase() === normalizedJobRole,
+            )
+            .map((session) => session.question)
+            .filter(Boolean)
+            .slice(0, 12);
+
           const { data, error } = await supabase.functions.invoke(
             "generate-question",
             {
-              body: { jobRole },
+              body: {
+                jobRole,
+                resumeSummary,
+                resumeRoles,
+                targetRoles,
+                previousQuestions,
+              },
             },
           );
 
@@ -638,6 +769,10 @@ const CandidateDashboardContent = () => {
     toUserFriendlyStartError,
     linkedKit,
     activeKitQuestionIndex,
+    resumeSummary,
+    resumeRoles,
+    targetRoles,
+    sessions,
   ]);
 
   const handleStartRecording = async () => {
@@ -828,6 +963,9 @@ const CandidateDashboardContent = () => {
               jobRole,
               question: currentQuestion,
               transcript: transcriptForFeedback,
+              resumeSummary,
+              resumeRoles,
+              targetRoles,
             },
           },
         );
@@ -1010,7 +1148,7 @@ const CandidateDashboardContent = () => {
             <Button
               variant="ghost"
               onClick={() => setSelectedSession(null)}
-              className="mb-4 text-muted-foreground hover:text-foreground"
+              className="gap-2 mb-4 text-muted-foreground hover:text-foreground"
             >
               ← Back to Dashboard
             </Button>
@@ -1098,16 +1236,36 @@ const CandidateDashboardContent = () => {
                   </TabsList>
                 </div>
 
-                {resumeSummary ? (
+                {resumeSummary || profileRoles.length > 0 ? (
                   <div className="max-w-2xl px-4 py-3 text-sm border shadow-sm rounded-2xl border-border/40 bg-secondary/20 text-foreground">
                     <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                      Resume summary
+                      Candidate context
                     </p>
-                    <p className="leading-6 text-foreground">{resumeSummary}</p>
+                    {resumeSummary && (
+                      <p className="leading-6 text-foreground">
+                        {resumeSummary}
+                      </p>
+                    )}
+                    {profileRoles.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mt-3">
+                        {profileRoles.map((role) => (
+                          <button
+                            key={role}
+                            type="button"
+                            onClick={() => {
+                              if (!linkedKit) setJobRole(role);
+                            }}
+                            className="px-2 py-1 text-xs border rounded-md border-border/50 bg-background/50 text-muted-foreground hover:text-foreground"
+                          >
+                            {role}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="max-w-2xl px-4 py-3 text-sm border border-dashed rounded-2xl border-border/40 bg-secondary/10 text-muted-foreground">
-                    Upload a resume in Profile to generate a summary.
+                    Upload a resume or add practice roles in Profile.
                   </div>
                 )}
               </div>
@@ -1180,6 +1338,25 @@ const CandidateDashboardContent = () => {
                             disabled={!!linkedKit}
                             className="bg-secondary/50 border-border/50 focus:border-primary/50 focus:ring-primary/20"
                           />
+                          {!linkedKit && profileRoles.length > 0 && (
+                            <div className="flex flex-wrap gap-2 mt-3">
+                              {profileRoles.map((role) => (
+                                <button
+                                  key={role}
+                                  type="button"
+                                  onClick={() => setJobRole(role)}
+                                  className={`px-2 py-1 text-xs border rounded-md transition-colors ${
+                                    jobRole.trim().toLowerCase() ===
+                                    role.toLowerCase()
+                                      ? "border-primary/60 bg-primary/10 text-primary"
+                                      : "border-border/50 bg-secondary/30 text-muted-foreground hover:text-foreground"
+                                  }`}
+                                >
+                                  {role}
+                                </button>
+                              ))}
+                            </div>
+                          )}
                         </div>
                         <Button
                           onClick={startInterview}

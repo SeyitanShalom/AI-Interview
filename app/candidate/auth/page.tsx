@@ -114,7 +114,9 @@ const CandidateAuth = () => {
         if (profileName) {
           await supabase.from("profiles").upsert(
             {
+              id: user.id,
               user_id: user.id,
+              role: "candidate",
               full_name: profileName,
             },
             { onConflict: "user_id" },
@@ -147,7 +149,9 @@ const CandidateAuth = () => {
 
           await supabase.from("profiles").upsert(
             {
+              id: data.user.id,
               user_id: data.user.id,
+              role: "candidate",
               full_name: fullName.trim(),
             },
             { onConflict: "user_id" },

@@ -24,6 +24,9 @@ type RequestBody = {
   jobRole?: string;
   question?: string;
   transcript?: string | null;
+  resumeSummary?: string | null;
+  resumeRoles?: string[];
+  targetRoles?: string[];
 };
 
 type DenoLike = {
@@ -31,6 +34,28 @@ type DenoLike = {
     get: (key: string) => string | undefined;
   };
   serve: (handler: (req: Request) => Response | Promise<Response>) => void;
+};
+
+type GeminiResponse = {
+  candidates?: Array<{
+    content?: {
+      parts?: Array<{
+        text?: string;
+      }>;
+    };
+  }>;
+};
+
+type OpenAIResponsesResponse = {
+  output_text?: string;
+  output?: Array<{
+    content?: Array<{
+      text?: string;
+    }>;
+  }>;
+  error?: {
+    message?: string;
+  };
 };
 
 const DenoRuntime = (globalThis as unknown as { Deno: DenoLike }).Deno;
@@ -42,7 +67,7 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const MIN_TRANSCRIPT_WORDS = 20;
+const MIN_TRANSCRIPT_WORDS = 1;
 
 function jsonResponse(payload: unknown, status = 200) {
   return new Response(JSON.stringify(payload), {
@@ -55,78 +80,162 @@ function clampScore(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
+function countWords(value: string) {
+  return value.trim().split(/\s+/).filter(Boolean).length;
+}
+
+function normalizeRole(value: unknown) {
+  if (typeof value !== "string") return null;
+
+  const role = value
+    .replace(/[\u2022*]/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^[,.;:\-\s]+|[,.;:\-\s]+$/g, "")
+    .trim();
+
+  if (role.length < 2 || role.length > 80) return null;
+  return role;
+}
+
+function normalizeRoles(values: unknown[]) {
+  const seen = new Set<string>();
+  const roles: string[] = [];
+
+  for (const value of values) {
+    const role = normalizeRole(value);
+    if (!role) continue;
+
+    const key = role.toLowerCase();
+    if (seen.has(key)) continue;
+
+    seen.add(key);
+    roles.push(role);
+    if (roles.length >= 12) break;
+  }
+
+  return roles;
+}
+
+function normalizeText(value: unknown, fallback = "") {
+  return typeof value === "string" && value.trim()
+    ? value.replace(/\s+/g, " ").trim()
+    : fallback;
+}
+
+function coerceStringList(values: unknown, fallback: string[]) {
+  if (!Array.isArray(values)) return fallback;
+
+  const list = values
+    .map((value) => normalizeText(value))
+    .filter(Boolean)
+    .slice(0, 5);
+
+  return list.length > 0 ? list : fallback;
+}
+
+function scoreFromTranscript(words: number, hasMetrics: boolean) {
+  const content = clampScore(34 + Math.min(words * 0.3, 38) + (hasMetrics ? 8 : 0));
+  const structure = clampScore(34 + Math.min(words * 0.26, 36));
+  const clarity = clampScore(42 + Math.min(words * 0.18, 34));
+  const impact = clampScore(28 + Math.min(words * 0.28, 36) + (hasMetrics ? 10 : 0));
+  const confidence = clampScore(44 + Math.min(words * 0.16, 30));
+
+  return { content, structure, clarity, impact, confidence };
+}
+
 function buildFallbackFeedback(
   jobRole: string,
   question: string,
   transcript: string | null,
 ): Feedback {
-  const words = (transcript ?? "").trim().split(/\s+/).filter(Boolean).length;
+  const normalizedTranscript = normalizeText(transcript);
+  const words = countWords(normalizedTranscript);
   const hasTranscript = words > 0;
-
-  const content = clampScore(
-    hasTranscript ? 45 + Math.min(words * 0.28, 35) : 45,
+  const hasMetrics = /(\d+|percent|revenue|users|customers|latency|cost|time|growth|conversion|accuracy|quality)/i.test(
+    normalizedTranscript,
   );
-  const structure = clampScore(
-    hasTranscript ? 42 + Math.min(words * 0.24, 35) : 44,
-  );
-  const clarity = clampScore(
-    hasTranscript ? 50 + Math.min(words * 0.18, 30) : 50,
-  );
-  const impact = clampScore(
-    hasTranscript ? 38 + Math.min(words * 0.3, 38) : 40,
-  );
-  const confidence = clampScore(
-    hasTranscript ? 52 + Math.min(words * 0.16, 28) : 52,
-  );
-
+  const rubric = scoreFromTranscript(words, hasMetrics);
   const contentScore = clampScore(
-    content * 0.5 + structure * 0.3 + impact * 0.2,
+    rubric.content * 0.5 + rubric.structure * 0.3 + rubric.impact * 0.2,
   );
-  const styleScore = clampScore(clarity * 0.6 + confidence * 0.4);
+  const styleScore = clampScore(rubric.clarity * 0.6 + rubric.confidence * 0.4);
   const overallScore = clampScore(contentScore * 0.6 + styleScore * 0.4);
 
   return {
-    rubric_scores: { content, structure, clarity, impact, confidence },
+    rubric_scores: rubric,
     content_score: contentScore,
     style_score: styleScore,
     overall_score: overallScore,
     summary: hasTranscript
-      ? "Initial rubric-based feedback was generated locally. Add stronger evidence and outcomes to improve precision."
-      : "Video submission was received, but no transcript text was provided for deep analysis. A baseline feedback profile has been generated.",
-    strengths: [
-      "Response stayed relevant to the interview prompt.",
-      "Communication was understandable and easy to follow.",
-      "You demonstrated a problem-solving mindset.",
-    ],
+      ? `Baseline rubric feedback for this ${jobRole} answer was generated from ${words} transcript words. More concrete evidence would make the assessment sharper.`
+      : "No transcript text was available, so only a minimal baseline assessment could be generated.",
+    strengths: hasTranscript
+      ? [
+          "The answer gives enough material to evaluate relevance to the question.",
+          hasMetrics
+            ? "The response includes some concrete evidence or measurable language."
+            : "The response attempts to explain the candidate's approach.",
+          "The response stays connected to the interview prompt.",
+        ]
+      : [
+          "The submission was received successfully.",
+          "The interview question is available for a later review.",
+          "A full assessment can be generated once transcript text is provided.",
+        ],
     improvements: [
-      "Use the STAR format (Situation, Task, Action, Result) for stronger structure.",
-      "Add specific outcomes or metrics to show impact.",
-      "End with one concise takeaway tied to the role.",
+      "Use Situation, Task, Action, and Result to make the answer easier to score.",
+      "Add specific decisions, tradeoffs, and measurable outcomes.",
+      "Close by tying the example back to the role and the question asked.",
     ],
-    content_analysis: `Role: ${jobRole}. Question analyzed: ${question}. Focus on clearer problem framing and concrete achievements to raise your content score.`,
+    content_analysis: `Question analyzed: ${question}. The answer should be scored on evidence from the transcript, not on assumed resume experience.`,
     style_analysis:
-      "Aim for confident pacing, concise sentences, and a stronger closing statement to improve delivery.",
+      "Aim for concise sentences, clear sequencing, and a confident closing takeaway.",
   };
 }
 
-async function callGeminiFeedback(
-  key: string,
-  model: string,
+function buildPrompt(
   jobRole: string,
   question: string,
-  transcript: string | null,
+  transcript: string,
+  resumeSummary: string | null,
+  resumeRoles: string[],
+  targetRoles: string[],
 ) {
-  const prompt = `
-You are an interview coach. Evaluate the candidate response and return ONLY strict JSON.
+  return `
+Evaluate this candidate interview answer and return strict JSON.
 
-Role: ${jobRole}
+Role being practiced:
+${jobRole}
 
-Use this rubric with 0-100 scores for each dimension:
-- content: relevance, technical depth, factual correctness
+Candidate-entered target roles:
+${targetRoles.length ? targetRoles.join(", ") : "None provided"}
+
+Resume-derived roles:
+${resumeRoles.length ? resumeRoles.join(", ") : "None provided"}
+
+Resume summary for calibration only:
+${resumeSummary || "No resume summary provided."}
+
+Interview question:
+${question}
+
+Candidate transcript:
+${transcript || "(no transcript provided)"}
+
+Scoring rules:
+- Score only what the transcript demonstrates.
+- Use resume context only to calibrate role expectations; do not award points for resume claims that are not present in the answer.
+- Penalize vague, generic, off-topic, or very short answers even if the resume context is strong.
+- Reward specific actions, decisions, tradeoffs, role-relevant depth, and measurable outcomes.
+- Reference concrete details from the answer when possible.
+- If evidence is missing, say what evidence is missing instead of filling gaps.
+
+Rubric, 0-100:
+- content: relevance to the question, role-specific depth, factual/technical soundness
 - structure: logical flow, STAR organization, coherence
 - clarity: concise language, readability, specificity
-- impact: measurable outcomes, business/user value, ownership
-- confidence: decisive tone, assertiveness, poise
+- impact: measurable outcomes, user/business value, ownership
+- confidence: decisive tone, poise, directness
 
 Weighting rules:
 - content_score = 50% content + 30% structure + 20% impact
@@ -152,15 +261,11 @@ Required JSON shape:
   "style_analysis": string
 }
 
-Interview question:
-${question}
-
-Candidate transcript (may be empty):
-${transcript || "(no transcript provided)"}
-
 Return only JSON, no markdown code fences.
 `.trim();
+}
 
+async function callGeminiFeedback(key: string, model: string, prompt: string) {
   return fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`,
     {
@@ -173,12 +278,99 @@ Return only JSON, no markdown code fences.
   );
 }
 
-function parseGeminiJson(rawText: string): Feedback | null {
-  const trimmed = rawText.trim();
-  const withoutFence = trimmed
+async function callOpenAIFeedback(key: string, model: string, prompt: string) {
+  return fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      instructions:
+        "You are a rigorous interview evaluator. Score only transcript evidence, use role context for calibration, and return only strict JSON.",
+      input: prompt,
+      max_output_tokens: 1800,
+      text: {
+        format: {
+          type: "json_schema",
+          name: "interview_feedback",
+          strict: true,
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              rubric_scores: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  content: { type: "number" },
+                  structure: { type: "number" },
+                  clarity: { type: "number" },
+                  impact: { type: "number" },
+                  confidence: { type: "number" },
+                },
+                required: [
+                  "content",
+                  "structure",
+                  "clarity",
+                  "impact",
+                  "confidence",
+                ],
+              },
+              content_score: { type: "number" },
+              style_score: { type: "number" },
+              overall_score: { type: "number" },
+              summary: { type: "string" },
+              strengths: {
+                type: "array",
+                items: { type: "string" },
+              },
+              improvements: {
+                type: "array",
+                items: { type: "string" },
+              },
+              content_analysis: { type: "string" },
+              style_analysis: { type: "string" },
+            },
+            required: [
+              "rubric_scores",
+              "content_score",
+              "style_score",
+              "overall_score",
+              "summary",
+              "strengths",
+              "improvements",
+              "content_analysis",
+              "style_analysis",
+            ],
+          },
+        },
+      },
+    }),
+  });
+}
+
+function extractOpenAIText(payload: OpenAIResponsesResponse) {
+  if (typeof payload.output_text === "string" && payload.output_text.trim()) {
+    return payload.output_text.trim();
+  }
+
+  return (
+    payload.output
+      ?.flatMap((item) => item.content ?? [])
+      .map((content) => content.text)
+      .filter((text): text is string => Boolean(text?.trim()))
+      .join("\n")
+      .trim() || ""
+  );
+}
+
+function parseFeedbackJson(rawText: string, fallback: Feedback): Feedback | null {
+  const withoutFence = rawText
     .replace(/^```json\s*/i, "")
     .replace(/^```\s*/i, "")
-    .replace(/```$/, "")
+    .replace(/\s*```$/i, "")
     .trim();
 
   const first = withoutFence.indexOf("{");
@@ -197,35 +389,47 @@ function parseGeminiJson(rawText: string): Feedback | null {
       typeof rubric.structure !== "number" ||
       typeof rubric.clarity !== "number" ||
       typeof rubric.impact !== "number" ||
-      typeof rubric.confidence !== "number" ||
-      typeof parsed.content_score !== "number" ||
-      typeof parsed.style_score !== "number" ||
-      typeof parsed.overall_score !== "number" ||
-      typeof parsed.summary !== "string" ||
-      !Array.isArray(parsed.strengths) ||
-      !Array.isArray(parsed.improvements) ||
-      typeof parsed.content_analysis !== "string" ||
-      typeof parsed.style_analysis !== "string"
+      typeof rubric.confidence !== "number"
     ) {
       return null;
     }
 
+    const cleanRubric = {
+      content: clampScore(rubric.content),
+      structure: clampScore(rubric.structure),
+      clarity: clampScore(rubric.clarity),
+      impact: clampScore(rubric.impact),
+      confidence: clampScore(rubric.confidence),
+    };
+    const contentScore = clampScore(
+      cleanRubric.content * 0.5 +
+        cleanRubric.structure * 0.3 +
+        cleanRubric.impact * 0.2,
+    );
+    const styleScore = clampScore(
+      cleanRubric.clarity * 0.6 + cleanRubric.confidence * 0.4,
+    );
+    const overallScore = clampScore(contentScore * 0.6 + styleScore * 0.4);
+
     return {
-      rubric_scores: {
-        content: clampScore(rubric.content),
-        structure: clampScore(rubric.structure),
-        clarity: clampScore(rubric.clarity),
-        impact: clampScore(rubric.impact),
-        confidence: clampScore(rubric.confidence),
-      },
-      content_score: clampScore(parsed.content_score),
-      style_score: clampScore(parsed.style_score),
-      overall_score: clampScore(parsed.overall_score),
-      summary: parsed.summary,
-      strengths: parsed.strengths.map((s) => String(s)).slice(0, 5),
-      improvements: parsed.improvements.map((s) => String(s)).slice(0, 5),
-      content_analysis: parsed.content_analysis,
-      style_analysis: parsed.style_analysis,
+      rubric_scores: cleanRubric,
+      content_score: contentScore,
+      style_score: styleScore,
+      overall_score: overallScore,
+      summary: normalizeText(parsed.summary, fallback.summary),
+      strengths: coerceStringList(parsed.strengths, fallback.strengths),
+      improvements: coerceStringList(
+        parsed.improvements,
+        fallback.improvements,
+      ),
+      content_analysis: normalizeText(
+        parsed.content_analysis,
+        fallback.content_analysis,
+      ),
+      style_analysis: normalizeText(
+        parsed.style_analysis,
+        fallback.style_analysis,
+      ),
     };
   } catch {
     return null;
@@ -276,6 +480,9 @@ DenoRuntime.serve(async (req: Request) => {
       jobRole = "Software Engineer",
       question,
       transcript = null,
+      resumeSummary = null,
+      resumeRoles = [],
+      targetRoles = [],
     } = (await req.json()) as RequestBody;
 
     if (!sessionId || !question) {
@@ -285,43 +492,111 @@ DenoRuntime.serve(async (req: Request) => {
       );
     }
 
-    const normalizedTranscript = (transcript ?? "").trim();
-    const transcriptWordCount = normalizedTranscript
-      .split(/\s+/)
-      .filter(Boolean).length;
+    const cleanJobRole = normalizeRole(jobRole) || "Software Engineer";
+    const cleanQuestion = normalizeText(question);
+    const normalizedTranscript = normalizeText(transcript);
+    const transcriptWordCount = countWords(normalizedTranscript);
+    const cleanResumeSummary =
+      typeof resumeSummary === "string" && resumeSummary.trim()
+        ? resumeSummary.replace(/\s+/g, " ").trim().slice(0, 1600)
+        : null;
+    const cleanResumeRoles = normalizeRoles(resumeRoles);
+    const cleanTargetRoles = normalizeRoles(targetRoles);
 
+    const fallbackFeedback = buildFallbackFeedback(
+      cleanJobRole,
+      cleanQuestion,
+      normalizedTranscript,
+    );
+    let feedback: Feedback = fallbackFeedback;
+    let usedFallback = true;
+    let provider: string | null = null;
+    let modelUsed: string | null = null;
+
+    const prompt = buildPrompt(
+      cleanJobRole,
+      cleanQuestion,
+      normalizedTranscript,
+      cleanResumeSummary,
+      cleanResumeRoles,
+      cleanTargetRoles,
+    );
+
+    const openAIKey = DenoRuntime.env.get("OPENAI_API_KEY");
+    const openAIModel = DenoRuntime.env.get("OPENAI_MODEL") || "gpt-5.2";
     const geminiKey = DenoRuntime.env.get("GEMINI_API_KEY");
     const geminiModel =
       DenoRuntime.env.get("GEMINI_MODEL") || "gemini-2.0-flash";
+    const providerPreference =
+      DenoRuntime.env.get("AI_PROVIDER")?.toLowerCase() || "openai";
+    const providerOrder =
+      providerPreference === "gemini"
+        ? ["gemini", "openai"]
+        : ["openai", "gemini"];
 
-    let feedback: Feedback = buildFallbackFeedback(
-      jobRole,
-      question,
-      normalizedTranscript,
-    );
-    let usedFallback = true;
+    if (transcriptWordCount >= MIN_TRANSCRIPT_WORDS) {
+      for (const candidateProvider of providerOrder) {
+        if (candidateProvider === "openai" && openAIKey) {
+          try {
+            const aiRes = await callOpenAIFeedback(
+              openAIKey,
+              openAIModel,
+              prompt,
+            );
+            if (aiRes.ok) {
+              const aiData = (await aiRes.json()) as OpenAIResponsesResponse;
+              const parsed = parseFeedbackJson(
+                extractOpenAIText(aiData),
+                fallbackFeedback,
+              );
+              if (parsed) {
+                feedback = parsed;
+                usedFallback = false;
+                provider = "openai";
+                modelUsed = openAIModel;
+                break;
+              }
+            }
+          } catch {
+            // Try the next configured provider.
+          }
+        }
 
-    if (geminiKey && transcriptWordCount >= MIN_TRANSCRIPT_WORDS) {
-      const geminiRes = await callGeminiFeedback(
-        geminiKey,
-        geminiModel,
-        jobRole,
-        question,
-        normalizedTranscript,
-      );
+        if (candidateProvider === "gemini" && geminiKey) {
+          const modelsToTry = [
+            geminiModel,
+            "gemini-2.0-flash",
+            "gemini-1.5-flash-latest",
+          ];
 
-      if (geminiRes.ok) {
-        const geminiData = (await geminiRes.json()) as {
-          candidates?: Array<{
-            content?: { parts?: Array<{ text?: string }> };
-          }>;
-        };
-        const text =
-          geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "";
-        const parsed = parseGeminiJson(text);
-        if (parsed) {
-          feedback = parsed;
-          usedFallback = false;
+          for (const model of modelsToTry) {
+            let geminiRes = await callGeminiFeedback(geminiKey, model, prompt);
+            if (geminiRes.status === 429) {
+              await new Promise((resolve) => setTimeout(resolve, 1200));
+              geminiRes = await callGeminiFeedback(geminiKey, model, prompt);
+            }
+
+            if (!geminiRes.ok) {
+              if (geminiRes.status === 404 || geminiRes.status === 429) {
+                continue;
+              }
+              break;
+            }
+
+            const geminiData = (await geminiRes.json()) as GeminiResponse;
+            const text =
+              geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "";
+            const parsed = parseFeedbackJson(text, fallbackFeedback);
+            if (parsed) {
+              feedback = parsed;
+              usedFallback = false;
+              provider = "gemini";
+              modelUsed = model;
+              break;
+            }
+          }
+
+          if (!usedFallback) break;
         }
       }
     }
@@ -332,6 +607,8 @@ DenoRuntime.serve(async (req: Request) => {
       {
         feedback,
         usedFallback,
+        provider,
+        modelUsed,
         minProviderWords: MIN_TRANSCRIPT_WORDS,
         transcriptWordCount,
       },

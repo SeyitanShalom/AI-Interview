@@ -5,6 +5,44 @@ create table if not exists public.profiles (
   updated_at timestamptz not null default now()
 );
 
+alter table public.profiles
+  add column if not exists user_id uuid references auth.users(id) on delete cascade,
+  add column if not exists full_name text not null default '',
+  add column if not exists created_at timestamptz not null default now(),
+  add column if not exists updated_at timestamptz not null default now();
+
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'profiles'
+      and column_name = 'id'
+  ) then
+    update public.profiles
+    set user_id = id
+    where user_id is null;
+  end if;
+
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'profiles'
+      and column_name = 'role'
+  ) then
+    alter table public.profiles
+      alter column role set default 'candidate';
+  end if;
+end $$;
+
+create unique index if not exists profiles_user_id_key
+  on public.profiles(user_id);
+
+alter table public.profiles
+  alter column user_id set not null;
+
 create or replace function public.get_shared_interview_kit(kit_uuid uuid)
 returns table (
   id uuid,
