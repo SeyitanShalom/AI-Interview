@@ -8,6 +8,11 @@ import { useAuth } from "@/lib/auth";
 import { Button } from "@/app/components/ui/button";
 import { Input } from "@/app/components/ui/input";
 import { Badge } from "@/app/components/ui/badge";
+import {
+  isMissingProfileResumeColumn,
+  isMissingProfileRoleColumn,
+  PROFILE_CONTEXT_MIGRATION_MESSAGE,
+} from "@/lib/profileSchema";
 
 type ProfileRecord = {
   resume_url?: string | null;
@@ -16,28 +21,20 @@ type ProfileRecord = {
   target_roles?: string[] | null;
 };
 
-const PROFILE_ROLE_MIGRATION_MESSAGE =
-  "Profile role columns are missing in Supabase. Run the latest migration to save role suggestions.";
-
-const getErrorMessage = (error: unknown) => {
-  if (error instanceof Error) return error.message;
-
-  if (error && typeof error === "object") {
-    const maybeError = error as { message?: unknown; details?: unknown };
-    return [maybeError.message, maybeError.details]
-      .filter((part): part is string => typeof part === "string" && !!part)
-      .join(" ");
-  }
-
-  return typeof error === "string" ? error : "";
+const previewResponseText = (value: string) => {
+  const compact = value.replace(/\s+/g, " ").trim();
+  return compact.length > 180 ? `${compact.slice(0, 180)}...` : compact;
 };
 
-const isMissingProfileRoleColumn = (error: unknown) => {
-  const message = getErrorMessage(error).toLowerCase();
-  return (
-    message.includes("schema cache") &&
-    (message.includes("resume_roles") || message.includes("target_roles"))
-  );
+const readJsonResponse = async <T,>(response: Response) => {
+  const text = await response.text();
+  if (!text.trim()) return { data: null as T | null, text };
+
+  try {
+    return { data: JSON.parse(text) as T, text };
+  } catch {
+    return { data: null as T | null, text };
+  }
 };
 
 const normalizeRole = (value: unknown) => {
@@ -77,6 +74,7 @@ const CandidateProfile = () => {
   const [resumeUrl, setResumeUrl] = useState<string | null>(null);
   const [resumeSummary, setResumeSummary] = useState<string | null>(null);
   const [resumeRoles, setResumeRoles] = useState<string[]>([]);
+  const [savedResumeRoles, setSavedResumeRoles] = useState<string[]>([]);
   const [targetRoles, setTargetRoles] = useState<string[]>([]);
   const [savedTargetRoles, setSavedTargetRoles] = useState<string[]>([]);
   const [roleInput, setRoleInput] = useState("");
@@ -85,9 +83,26 @@ const CandidateProfile = () => {
   const router = useRouter();
 
   const rolesChanged = useMemo(
-    () => targetRoles.join("\u0000") !== savedTargetRoles.join("\u0000"),
-    [savedTargetRoles, targetRoles],
+    () =>
+      resumeRoles.join("\u0000") !== savedResumeRoles.join("\u0000") ||
+      targetRoles.join("\u0000") !== savedTargetRoles.join("\u0000"),
+    [resumeRoles, savedResumeRoles, savedTargetRoles, targetRoles],
   );
+
+  const getAuthHeaders = async (json = false) => {
+    const { supabase } = await import("@/lib/supabase");
+    const sessionRes = await supabase.auth.getSession();
+    const token = sessionRes?.data?.session?.access_token ?? null;
+    const headers: Record<string, string> = json
+      ? { "Content-Type": "application/json" }
+      : {};
+
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+
+    return headers;
+  };
 
   useEffect(() => {
     if (!user) return;
@@ -96,24 +111,45 @@ const CandidateProfile = () => {
       try {
         const { supabase } = await import("@/lib/supabase");
 
-        const { data, error } = await supabase
-          .from("profiles")
-          .select("resume_url, resume_summary, resume_roles, target_roles")
-          .eq("user_id", user.id)
-          .maybeSingle();
-        let profile = data as ProfileRecord | null;
-
-        if (error) {
-          if (!isMissingProfileRoleColumn(error)) throw error;
-
-          const { data: fallbackData, error: fallbackError } = await supabase
+        const selectProfile = (columns: string) =>
+          supabase
             .from("profiles")
-            .select("resume_url, resume_summary")
+            .select(columns)
             .eq("user_id", user.id)
             .maybeSingle();
 
-          if (fallbackError) throw fallbackError;
-          profile = fallbackData as ProfileRecord | null;
+        let { data, error } = await selectProfile(
+          "resume_url, resume_summary, resume_roles, target_roles",
+        );
+        let profile = data as ProfileRecord | null;
+        let profileSchemaWarning: unknown = null;
+
+        if (error && isMissingProfileRoleColumn(error)) {
+          profileSchemaWarning = error;
+          const fallback = await selectProfile("resume_url, resume_summary");
+          data = fallback.data;
+          error = fallback.error;
+          profile = data as ProfileRecord | null;
+        }
+
+        if (error && isMissingProfileResumeColumn(error)) {
+          profileSchemaWarning = error;
+          const fallback = await selectProfile("resume_url");
+          data = fallback.data;
+          error = fallback.error;
+          profile = data as ProfileRecord | null;
+        }
+
+        if (error && isMissingProfileResumeColumn(error)) {
+          profileSchemaWarning = error;
+          profile = null;
+          error = null;
+        }
+
+        if (error) throw error;
+
+        if (profileSchemaWarning) {
+          console.warn("Profile schema migration needed", profileSchemaWarning);
         }
 
         setResumeUrl(
@@ -128,6 +164,7 @@ const CandidateProfile = () => {
         const nextResumeRoles = normalizeRoles(profile?.resume_roles ?? []);
         const nextTargetRoles = normalizeRoles(profile?.target_roles ?? []);
         setResumeRoles(nextResumeRoles);
+        setSavedResumeRoles(nextResumeRoles);
         setTargetRoles(nextTargetRoles);
         setSavedTargetRoles(nextTargetRoles);
       } catch (error) {
@@ -149,27 +186,41 @@ const CandidateProfile = () => {
       const form = new FormData();
       form.append("file", file);
 
-      const { supabase } = await import("@/lib/supabase");
-      const sessionRes = await supabase.auth.getSession();
-      const token = sessionRes?.data?.session?.access_token ?? null;
-
       const res = await fetch("/api/candidate/resume", {
         method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        headers: await getAuthHeaders(),
         body: form,
       });
 
-      const json = (await res.json()) as {
+      const { data: json, text: rawResponse } = await readJsonResponse<{
         error?: string;
         publicUrl?: string | null;
         resumeSummary?: string | null;
         resumeRoles?: string[];
+        resumeMetadataPersisted?: boolean;
+        resumeUrlPersisted?: boolean;
+        profilePersisted?: boolean;
         rolesPersisted?: boolean;
         warning?: string;
         profile?: ProfileRecord | null;
-      };
+      }>(res);
 
-      if (!res.ok) throw new Error(json?.error || "Upload failed");
+      if (!res.ok) {
+        throw new Error(
+          json?.error ||
+            (rawResponse.trim()
+              ? `Upload failed (${res.status}): ${previewResponseText(rawResponse)}`
+              : "Upload failed"),
+        );
+      }
+
+      if (!json) {
+        throw new Error(
+          rawResponse.trim()
+            ? `Upload endpoint returned non-JSON (${res.status}): ${previewResponseText(rawResponse)}`
+            : "Upload endpoint returned an empty response.",
+        );
+      }
 
       const profile = json.profile;
       const nextSummary =
@@ -183,9 +234,16 @@ const CandidateProfile = () => {
       setResumeUrl(profile?.resume_url ?? json.publicUrl ?? null);
       setResumeSummary(nextSummary?.trim() || null);
       setResumeRoles(nextRoles);
-      if (json.rolesPersisted === false) {
+      setSavedResumeRoles(nextRoles);
+      if (
+        json.warning ||
+        json.profilePersisted === false ||
+        json.rolesPersisted === false ||
+        json.resumeMetadataPersisted === false ||
+        json.resumeUrlPersisted === false
+      ) {
         toast.warning("Resume uploaded", {
-          description: json.warning || PROFILE_ROLE_MIGRATION_MESSAGE,
+          description: json.warning || PROFILE_CONTEXT_MIGRATION_MESSAGE,
         });
       } else {
         toast.success("Resume uploaded");
@@ -193,7 +251,12 @@ const CandidateProfile = () => {
     } catch (err) {
       console.error(err);
       setResumeSummary(null);
-      toast.error("Upload failed. Ensure the resumes bucket exists.");
+      toast.error("Upload failed", {
+        description:
+          err instanceof Error
+            ? err.message
+            : "Check the resume bucket and profile database migration.",
+      });
     } finally {
       setUploading(false);
     }
@@ -202,59 +265,36 @@ const CandidateProfile = () => {
   const handleDelete = async () => {
     if (!resumeUrl || !user) return;
 
-    const parts = resumeUrl.split("/resumes/");
-    const path = parts[1] || null;
-    if (!path) {
-      toast.error("Unable to determine storage path for resume");
-      return;
-    }
-
     try {
-      const { supabase } = await import("@/lib/supabase");
+      const res = await fetch("/api/candidate/resume", {
+        method: "DELETE",
+        headers: await getAuthHeaders(),
+      });
+      const { data: json, text: rawResponse } = await readJsonResponse<{
+        error?: string;
+        profile?: ProfileRecord | null;
+      }>(res);
 
-      const { error } = await supabase.storage.from("resumes").remove([path]);
-      if (error) throw error;
-
-      const { error: profileError } = await supabase.from("profiles").upsert(
-        {
-          id: user.id,
-          user_id: user.id,
-          role: "candidate",
-          resume_url: null,
-          resume_text: null,
-          resume_summary: null,
-          resume_roles: [],
-        },
-        { onConflict: "user_id" },
-      );
-
-      if (profileError) {
-        if (!isMissingProfileRoleColumn(profileError)) throw profileError;
-
-        const { error: fallbackProfileError } = await supabase
-          .from("profiles")
-          .upsert(
-            {
-              id: user.id,
-              user_id: user.id,
-              role: "candidate",
-              resume_url: null,
-              resume_text: null,
-              resume_summary: null,
-            },
-            { onConflict: "user_id" },
-          );
-
-        if (fallbackProfileError) throw fallbackProfileError;
+      if (!res.ok) {
+        throw new Error(
+          json?.error ||
+            (rawResponse.trim()
+              ? `Delete failed (${res.status}): ${previewResponseText(rawResponse)}`
+              : "Delete failed"),
+        );
       }
 
       setResumeUrl(null);
       setResumeSummary(null);
       setResumeRoles([]);
+      setSavedResumeRoles([]);
       toast.success("Resume deleted");
     } catch (err) {
       console.error(err);
-      toast.error("Failed to delete resume");
+      toast.error("Failed to delete resume", {
+        description:
+          err instanceof Error ? err.message : "Please refresh and try again.",
+      });
     }
   };
 
@@ -275,39 +315,45 @@ const CandidateProfile = () => {
     );
   };
 
-  const saveManualRoles = async () => {
+  const removeResumeRole = (role: string) => {
+    setResumeRoles((roles) =>
+      roles.filter((item) => item.toLowerCase() !== role.toLowerCase()),
+    );
+  };
+
+  const saveRoleChanges = async () => {
     if (!user) return;
 
     setSavingRoles(true);
     try {
-      const { supabase } = await import("@/lib/supabase");
-      const { data, error } = await supabase
-        .from("profiles")
-        .upsert(
-          {
-            id: user.id,
-            user_id: user.id,
-            role: "candidate",
-            target_roles: targetRoles,
-          },
-          { onConflict: "user_id" },
-        )
-        .select("target_roles")
-        .single();
+      const res = await fetch("/api/candidate/resume", {
+        method: "PATCH",
+        headers: await getAuthHeaders(true),
+        body: JSON.stringify({
+          resumeRoles,
+          targetRoles,
+        }),
+      });
+      const { data: json, text: rawResponse } = await readJsonResponse<{
+        error?: string;
+        profile?: ProfileRecord | null;
+      }>(res);
 
-      if (error) {
-        if (isMissingProfileRoleColumn(error)) {
-          toast.warning("Migration needed", {
-            description: PROFILE_ROLE_MIGRATION_MESSAGE,
-          });
-          return;
-        }
-
-        throw error;
+      if (!res.ok) {
+        throw new Error(
+          json?.error ||
+            (rawResponse.trim()
+              ? `Save failed (${res.status}): ${previewResponseText(rawResponse)}`
+              : "Save failed"),
+        );
       }
 
-      const profile = data as { target_roles?: string[] | null } | null;
+      const profile = json?.profile;
+      if (!profile) throw new Error("Profile update failed");
+      const nextResumeRoles = normalizeRoles(profile.resume_roles ?? resumeRoles);
       const nextRoles = normalizeRoles(profile?.target_roles ?? targetRoles);
+      setResumeRoles(nextResumeRoles);
+      setSavedResumeRoles(nextResumeRoles);
       setTargetRoles(nextRoles);
       setSavedTargetRoles(nextRoles);
       toast.success("Roles saved");
@@ -357,6 +403,9 @@ const CandidateProfile = () => {
 
           <Input
             type="file"
+            onClick={(event) => {
+              event.currentTarget.value = "";
+            }}
             onChange={(e) => handleUpload(e.target.files?.[0] ?? null)}
             accept="application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             disabled={uploading}
@@ -405,14 +454,28 @@ const CandidateProfile = () => {
             {resumeRoles.length > 0 ? (
               <div className="flex flex-wrap gap-2">
                 {resumeRoles.map((role) => (
-                  <Badge key={role} variant="secondary" className="h-6">
+                  <Badge
+                    key={role}
+                    variant="secondary"
+                    className="h-7 gap-1 pr-1"
+                  >
                     {role}
+                    <button
+                      type="button"
+                      onClick={() => removeResumeRole(role)}
+                      className="inline-flex items-center justify-center w-5 h-5 rounded hover:bg-muted"
+                      aria-label={`Remove ${role}`}
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
                   </Badge>
                 ))}
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">
-                Upload a resume to extract role suggestions.
+                {resumeUrl
+                  ? "No resume roles selected."
+                  : "Upload a resume to extract role suggestions."}
               </p>
             )}
           </div>
@@ -468,11 +531,11 @@ const CandidateProfile = () => {
           )}
 
           <Button
-            onClick={saveManualRoles}
+            onClick={saveRoleChanges}
             disabled={!rolesChanged || savingRoles}
             className="gap-2"
           >
-            {savingRoles ? "Saving..." : "Save roles"}
+            {savingRoles ? "Saving..." : "Save role changes"}
           </Button>
         </section>
       </div>

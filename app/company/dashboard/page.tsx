@@ -19,6 +19,7 @@ import InviteCodeManager from "@/app/components/company/InviteCodeManager";
 import InterviewKitBuilder from "@/app/components/company/InterviewKitBuilder";
 import CandidateReview from "@/app/components/company/CandidateReview";
 import AnalyticsCharts from "@/app/components/company/AnalyticsCharts";
+import { isMissingProfileResumeColumn } from "@/lib/profileSchema";
 
 const getReadableError = (error: unknown) => {
   if (!error) return null;
@@ -358,18 +359,41 @@ const CompanyDashboard = () => {
           ),
         ];
         if (userIds.length > 0) {
-          const { data: profilesData, error: profilesError } = await supabase
+          let { data: profilesData, error: profilesError } = await supabase
             .from("profiles")
             .select("user_id, full_name, resume_summary")
             .in("user_id", userIds);
 
           if (profilesError) {
-            throw new Error(
-              `candidate profiles load failed: ${profilesError.message}`,
+            if (!isMissingProfileResumeColumn(profilesError)) {
+              throw new Error(
+                `candidate profiles load failed: ${profilesError.message}`,
+              );
+            }
+
+            const fallback = await supabase
+              .from("profiles")
+              .select("user_id, full_name")
+              .in("user_id", userIds);
+
+            profilesData = fallback.data?.map(
+              (profile: { user_id: string; full_name: string }) => ({
+                ...profile,
+                resume_summary: null,
+              }),
             );
+            profilesError = fallback.error;
+
+            if (profilesError) {
+              throw new Error(
+                `candidate profiles load failed: ${profilesError.message}`,
+              );
+            }
           }
 
-          if (profilesData) setCandidateProfiles(profilesData);
+          if (profilesData) {
+            setCandidateProfiles(profilesData as CandidateProfileSummary[]);
+          }
         }
       }
     } catch (error) {

@@ -47,6 +47,10 @@ import AIInterviewer from "@/app/components/interview/AIInterviewer";
 import VideoRecorder from "@/app/components/interview/VideoRecorder";
 import FeedbackDisplay from "@/app/components/interview/FeedbackDisplay";
 import SessionHistory from "@/app/components/interview/SessionHistory";
+import {
+  isMissingProfileResumeColumn,
+  isMissingProfileRoleColumn,
+} from "@/lib/profileSchema";
 
 type InterviewStep = "setup" | "interview" | "analyzing" | "feedback";
 
@@ -93,27 +97,6 @@ type ProfileRecord = {
   target_roles?: string[] | null;
 };
 
-const getErrorMessage = (error: unknown) => {
-  if (error instanceof Error) return error.message;
-
-  if (error && typeof error === "object") {
-    const maybeError = error as { message?: unknown; details?: unknown };
-    return [maybeError.message, maybeError.details]
-      .filter((part): part is string => typeof part === "string" && !!part)
-      .join(" ");
-  }
-
-  return typeof error === "string" ? error : "";
-};
-
-const isMissingProfileRoleColumn = (error: unknown) => {
-  const message = getErrorMessage(error).toLowerCase();
-  return (
-    message.includes("schema cache") &&
-    (message.includes("resume_roles") || message.includes("target_roles"))
-  );
-};
-
 interface BrowserSpeechRecognitionAlternative {
   transcript: string;
 }
@@ -150,6 +133,22 @@ type LocalTranscriptionPayload = {
   duration?: number | null;
   confidence?: number | null;
   engine?: string;
+};
+
+const previewResponseText = (value: string) => {
+  const compact = value.replace(/\s+/g, " ").trim();
+  return compact.length > 180 ? `${compact.slice(0, 180)}...` : compact;
+};
+
+const readJsonResponse = async <T,>(response: Response) => {
+  const text = await response.text();
+  if (!text.trim()) return { data: null as T | null, text };
+
+  try {
+    return { data: JSON.parse(text) as T, text };
+  } catch {
+    return { data: null as T | null, text };
+  }
 };
 
 const countWords = (value: string) =>
@@ -189,6 +188,14 @@ const normalizeRoles = (values: unknown[]) => {
 
   return roles;
 };
+
+const splitRoleInput = (value: string) =>
+  normalizeRoles(value.split(/[,;\n\r]+/));
+
+const getRandomRole = (roles: string[]) =>
+  roles.length > 0
+    ? roles[Math.floor(Math.random() * roles.length)]
+    : "Software Engineer";
 
 const buildFallbackFeedback = (
   jobRole: string,
@@ -255,6 +262,7 @@ const CandidateDashboardContent = () => {
   const [kitError, setKitError] = useState<string | null>(null);
   const [activeKitQuestionIndex, setActiveKitQuestionIndex] = useState(0);
   const [currentQuestion, setCurrentQuestion] = useState("");
+  const [activeQuestionRole, setActiveQuestionRole] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
@@ -283,6 +291,11 @@ const CandidateDashboardContent = () => {
   const profileRoles = useMemo(
     () => normalizeRoles([...targetRoles, ...resumeRoles]),
     [resumeRoles, targetRoles],
+  );
+
+  const practiceRolePool = useMemo(
+    () => normalizeRoles([...splitRoleInput(jobRole), ...profileRoles]),
+    [jobRole, profileRoles],
   );
 
   const normalizeErrorMessage = useCallback((e: unknown) => {
@@ -342,8 +355,11 @@ const CandidateDashboardContent = () => {
     return message;
   }, []);
 
-  const getBackupQuestion = useCallback((role: string) => {
-    const normalizedRole = role.trim() || "Software Engineer";
+  const getBackupQuestion = useCallback((rolesOrRole: string | string[]) => {
+    const roles = Array.isArray(rolesOrRole)
+      ? normalizeRoles(rolesOrRole)
+      : splitRoleInput(rolesOrRole);
+    const normalizedRole = getRandomRole(roles);
     const templates = [
       "Describe a complex problem you solved as a {role}. What options did you consider and why did you choose your final approach?",
       "Tell me about a time you had to deliver results as a {role} under a tight deadline. How did you prioritize?",
@@ -374,31 +390,40 @@ const CandidateDashboardContent = () => {
     if (!user) return;
 
     const loadProfileContext = async () => {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("resume_summary, resume_roles, target_roles")
-        .eq("user_id", user.id)
-        .maybeSingle();
-      let profile = data as ProfileRecord | null;
-
-      if (error) {
-        if (!isMissingProfileRoleColumn(error)) {
-          console.warn("Failed to load profile context", error);
-          return;
-        }
-
-        const { data: fallbackData, error: fallbackError } = await supabase
+      const selectProfile = (columns: string) =>
+        supabase
           .from("profiles")
-          .select("resume_summary")
+          .select(columns)
           .eq("user_id", user.id)
           .maybeSingle();
 
-        if (fallbackError) {
-          console.warn("Failed to load fallback profile context", fallbackError);
-          return;
-        }
+      let { data, error } = await selectProfile(
+        "resume_summary, resume_roles, target_roles",
+      );
+      let profile = data as ProfileRecord | null;
+      let profileSchemaWarning: unknown = null;
 
-        profile = fallbackData as ProfileRecord | null;
+      if (error && isMissingProfileRoleColumn(error)) {
+        profileSchemaWarning = error;
+        const fallback = await selectProfile("resume_summary");
+        data = fallback.data;
+        error = fallback.error;
+        profile = data as ProfileRecord | null;
+      }
+
+      if (error && isMissingProfileResumeColumn(error)) {
+        profileSchemaWarning = error;
+        profile = null;
+        error = null;
+      }
+
+      if (error) {
+        console.warn("Failed to load profile context", error);
+        return;
+      }
+
+      if (profileSchemaWarning) {
+        console.warn("Profile schema migration needed", profileSchemaWarning);
       }
 
       const nextResumeSummary =
@@ -633,8 +658,10 @@ const CandidateDashboardContent = () => {
       .filter(
         (
           permission,
-        ): permission is { name: "camera" | "microphone"; state: PermissionState } =>
-          Boolean(permission && permission.state === "denied"),
+        ): permission is {
+          name: "camera" | "microphone";
+          state: PermissionState;
+        } => Boolean(permission && permission.state === "denied"),
       )
       .map((permission) => permissionLabels[permission.name]);
 
@@ -655,6 +682,7 @@ const CandidateDashboardContent = () => {
       }
 
       let question = "";
+      let questionRole = linkedKit?.job_role || getRandomRole(practiceRolePool);
 
       if (linkedKit) {
         question =
@@ -667,12 +695,22 @@ const CandidateDashboardContent = () => {
         }
       } else {
         try {
+          const rolePool = practiceRolePool.length
+            ? practiceRolePool
+            : splitRoleInput(jobRole);
+          const roleKeys = new Set(
+            rolePool.map((role) => role.trim().toLowerCase()),
+          );
           const normalizedJobRole = jobRole.trim().toLowerCase();
           const previousQuestions = sessions
-            .filter(
-              (session) =>
-                session.job_role.trim().toLowerCase() === normalizedJobRole,
-            )
+            .filter((session) => {
+              const sessionRole = session.job_role.trim().toLowerCase();
+              if (sessionRole === normalizedJobRole) return true;
+
+              return splitRoleInput(session.job_role).some((role) =>
+                roleKeys.has(role.toLowerCase()),
+              );
+            })
             .map((session) => session.question)
             .filter(Boolean)
             .slice(0, 12);
@@ -682,6 +720,7 @@ const CandidateDashboardContent = () => {
             {
               body: {
                 jobRole,
+                rolePool,
                 resumeSummary,
                 resumeRoles,
                 targetRoles,
@@ -694,13 +733,24 @@ const CandidateDashboardContent = () => {
 
           question =
             typeof data?.question === "string" ? data.question.trim() : "";
+          questionRole =
+            typeof data?.focusRole === "string" && data.focusRole.trim()
+              ? data.focusRole.trim()
+              : questionRole;
 
           if (!question) {
             throw new Error("No interview question returned from AI provider");
           }
         } catch (e: unknown) {
-          console.warn("AI question generation failed; using backup question.", e);
-          question = getBackupQuestion(jobRole);
+          console.warn(
+            "AI question generation failed; using backup question.",
+            e,
+          );
+          const fallbackRoles = practiceRolePool.length
+            ? practiceRolePool
+            : splitRoleInput(jobRole);
+          questionRole = getRandomRole(fallbackRoles);
+          question = getBackupQuestion([questionRole]);
         }
       }
 
@@ -713,7 +763,7 @@ const CandidateDashboardContent = () => {
         interview_kit_id?: string;
       } = {
         user_id: user.id,
-        job_role: linkedKit?.job_role || jobRole,
+        job_role: questionRole,
         question,
         status: "pending",
       };
@@ -738,6 +788,7 @@ const CandidateDashboardContent = () => {
       }
 
       setCurrentQuestion(question);
+      setActiveQuestionRole(questionRole);
       setCurrentSessionId(session.id);
 
       setAnswerTranscript("");
@@ -772,6 +823,7 @@ const CandidateDashboardContent = () => {
     resumeSummary,
     resumeRoles,
     targetRoles,
+    practiceRolePool,
     sessions,
   ]);
 
@@ -832,20 +884,27 @@ const CandidateDashboardContent = () => {
       body: formData,
     });
 
+    const { data: payload, text: rawResponse } = await readJsonResponse<
+      LocalTranscriptionPayload & { error?: unknown }
+    >(response);
+
     if (!response.ok) {
-      let message = "Local transcription failed";
-      try {
-        const errorPayload = await response.json();
-        if (typeof errorPayload?.error === "string" && errorPayload.error) {
-          message = errorPayload.error;
-        }
-      } catch {
-        // Ignore JSON parse failures and keep fallback message.
-      }
+      const message =
+        typeof payload?.error === "string" && payload.error
+          ? payload.error
+          : rawResponse.trim()
+            ? `Local transcription failed (${response.status}): ${previewResponseText(rawResponse)}`
+            : "Local transcription failed";
       throw new Error(message);
     }
 
-    const payload = (await response.json()) as LocalTranscriptionPayload;
+    if (!payload) {
+      const message = rawResponse.trim()
+        ? `Transcription endpoint returned non-JSON (${response.status}): ${previewResponseText(rawResponse)}`
+        : "Transcription endpoint returned an empty response.";
+      throw new Error(message);
+    }
+
     return {
       text: typeof payload.text === "string" ? payload.text.trim() : "",
       confidence:
@@ -867,12 +926,14 @@ const CandidateDashboardContent = () => {
     }
 
     setIsSubmittingAnswer(true);
+    setAnswerTranscript("");
+    manualTranscriptEditedRef.current = false;
     setTranscriptionError(null);
 
     try {
-      let transcriptForFeedback = answerTranscript.trim();
+      let transcriptForFeedback = "";
 
-      if (!transcriptForFeedback && recorder.recordedBlob) {
+      if (recorder.recordedBlob) {
         setIsTranscribing(true);
         try {
           const localResult = await transcribeWithLocalWhisper(
@@ -882,25 +943,45 @@ const CandidateDashboardContent = () => {
           if (localTranscript) {
             transcriptForFeedback = localTranscript;
             setAnswerTranscript(localTranscript);
+            manualTranscriptEditedRef.current = false;
             toast.success("Transcript generated", {
               description: "Your recording was transcribed successfully.",
             });
+          } else if (answerTranscript.trim()) {
+            transcriptForFeedback = answerTranscript.trim();
           }
         } catch (transcriptionError) {
-          console.warn(
-            "Automatic transcription failed:",
-            transcriptionError,
-          );
-          setTranscriptionError(
-            "Automatic transcription could not produce text. Add the transcript below and submit again.",
-          );
-          toast.error("Transcript needed", {
-            description:
-              "Automatic transcription did not return speech text. Add the transcript below and submit again.",
-          });
-          return;
+          console.warn("Automatic transcription failed:", transcriptionError);
+          const transcriptionMessage =
+            transcriptionError instanceof Error
+              ? transcriptionError.message
+              : "Automatic transcription did not return speech text.";
+
+          if (answerTranscript.trim()) {
+            transcriptForFeedback = answerTranscript.trim();
+          } else {
+            setTranscriptionError(
+              `${transcriptionMessage} Add the transcript below and submit again.`,
+            );
+            toast.error("Transcript needed", {
+              description: transcriptionMessage,
+            });
+            return;
+          }
         } finally {
           setIsTranscribing(false);
+        }
+      } else {
+        transcriptForFeedback = answerTranscript.trim();
+
+        if (!transcriptForFeedback) {
+          setTranscriptionError(
+            "Add the transcript below so feedback can be generated.",
+          );
+          toast.error("Transcript needed", {
+            description: "Add the transcript below and submit again.",
+          });
+          return;
         }
       }
 
@@ -927,7 +1008,9 @@ const CandidateDashboardContent = () => {
               cacheControl: "0",
             });
           if (uploadError) {
-            throw new Error(uploadError.message || "Failed to upload recording");
+            throw new Error(
+              uploadError.message || "Failed to upload recording",
+            );
           }
 
           const { data: urlData } = supabase.storage
@@ -953,6 +1036,8 @@ const CandidateDashboardContent = () => {
 
       let nextFeedback: Feedback | null = null;
       let usedFallbackFeedback = false;
+      const feedbackRole =
+        activeQuestionRole || getRandomRole(practiceRolePool);
 
       try {
         const { data, error } = await supabase.functions.invoke(
@@ -960,7 +1045,7 @@ const CandidateDashboardContent = () => {
           {
             body: {
               sessionId: currentSessionId,
-              jobRole,
+              jobRole: feedbackRole,
               question: currentQuestion,
               transcript: transcriptForFeedback,
               resumeSummary,
@@ -983,7 +1068,7 @@ const CandidateDashboardContent = () => {
           error: feedbackError,
         });
         nextFeedback = buildFallbackFeedback(
-          jobRole,
+          feedbackRole,
           currentQuestion,
           transcriptForFeedback,
         );
@@ -1041,6 +1126,7 @@ const CandidateDashboardContent = () => {
     setFeedback(null);
     setCurrentSessionId(null);
     setCurrentQuestion("");
+    setActiveQuestionRole("");
     setSelectedSession(null);
     setAnswerTranscript("");
     manualTranscriptEditedRef.current = false;
@@ -1235,39 +1321,6 @@ const CandidateDashboardContent = () => {
                     </TabsTrigger>
                   </TabsList>
                 </div>
-
-                {resumeSummary || profileRoles.length > 0 ? (
-                  <div className="max-w-2xl px-4 py-3 text-sm border shadow-sm rounded-2xl border-border/40 bg-secondary/20 text-foreground">
-                    <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                      Candidate context
-                    </p>
-                    {resumeSummary && (
-                      <p className="leading-6 text-foreground">
-                        {resumeSummary}
-                      </p>
-                    )}
-                    {profileRoles.length > 0 && (
-                      <div className="flex flex-wrap gap-2 mt-3">
-                        {profileRoles.map((role) => (
-                          <button
-                            key={role}
-                            type="button"
-                            onClick={() => {
-                              if (!linkedKit) setJobRole(role);
-                            }}
-                            className="px-2 py-1 text-xs border rounded-md border-border/50 bg-background/50 text-muted-foreground hover:text-foreground"
-                          >
-                            {role}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="max-w-2xl px-4 py-3 text-sm border border-dashed rounded-2xl border-border/40 bg-secondary/10 text-muted-foreground">
-                    Upload a resume or add practice roles in Profile.
-                  </div>
-                )}
               </div>
             </motion.div>
 
@@ -1280,77 +1333,27 @@ const CandidateDashboardContent = () => {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -20 }}
                   >
-                    <Card className="max-w-lg mx-auto glass-card glow-border">
-                      <CardHeader className="pb-4 text-center">
-                        <div className="w-20 h-20 rounded-2xl bg-linear-to-br from-primary/20 to-primary/5 flex items-center justify-center mx-auto mb-4 shadow-[0_0_30px_-8px_hsl(var(--primary)/0.3)]">
-                          <Bot className="w-10 h-10 text-primary" />
-                        </div>
-                        <CardTitle className="text-xl font-display">
-                          {linkedKit
-                            ? "Start Interview Kit"
-                            : "Start Practice Session"}
-                        </CardTitle>
-                        <p className="text-sm text-muted-foreground">
-                          {linkedKit
-                            ? "Answer this company question on video and get instant feedback."
-                            : "Our AI interviewer will ask you a question. Record your answer and get instant feedback."}
-                        </p>
-                      </CardHeader>
-                      <CardContent className="space-y-4">
-                        {kitLoading && (
-                          <div className="flex items-center gap-2 px-4 py-3 text-sm border rounded-xl border-border/50 bg-secondary/30 text-muted-foreground">
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                            Loading interview kit...
-                          </div>
-                        )}
-
-                        {kitError && (
-                          <div className="px-4 py-3 text-sm border rounded-xl border-destructive/30 bg-destructive/10 text-destructive">
-                            {kitError}
-                          </div>
-                        )}
-
-                        {linkedKit && (
-                          <div className="px-4 py-3 border rounded-xl border-primary/20 bg-primary/10">
-                            <div className="flex items-start gap-3">
-                              <FileText className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                              <div>
-                                <p className="text-sm font-medium text-foreground">
-                                  {linkedKit.title}
-                                </p>
-                                <p className="mt-1 text-xs text-muted-foreground">
-                                  Question {activeKitQuestionIndex + 1} of{" "}
-                                  {linkedKit.questions.length}
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-
-                        <div>
-                          <label className="block mb-2 text-sm font-medium text-foreground">
-                            Job Role
-                          </label>
-                          <Input
-                            value={jobRole}
-                            onChange={(e) => setJobRole(e.target.value)}
-                            placeholder="e.g. Software Engineer, Product Manager"
-                            disabled={!!linkedKit}
-                            className="bg-secondary/50 border-border/50 focus:border-primary/50 focus:ring-primary/20"
-                          />
-                          {!linkedKit && profileRoles.length > 0 && (
+                    <div className="grid gap-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:items-start">
+                      {resumeSummary || profileRoles.length > 0 ? (
+                        <div className="px-4 py-3 text-sm border shadow-sm rounded-2xl border-border/40 bg-secondary/20 text-foreground">
+                          <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                            Candidate context
+                          </p>
+                          {resumeSummary && (
+                            <p className="leading-6 text-foreground">
+                              {resumeSummary}
+                            </p>
+                          )}
+                          {profileRoles.length > 0 && (
                             <div className="flex flex-wrap gap-2 mt-3">
                               {profileRoles.map((role) => (
                                 <button
                                   key={role}
                                   type="button"
-                                  onClick={() => setJobRole(role)}
-                                  className={`px-2 py-1 text-xs border rounded-md transition-colors ${
-                                    jobRole.trim().toLowerCase() ===
-                                    role.toLowerCase()
-                                      ? "border-primary/60 bg-primary/10 text-primary"
-                                      : "border-border/50 bg-secondary/30 text-muted-foreground hover:text-foreground"
-                                  }`}
+                                  onClick={() => {
+                                    if (!linkedKit) setJobRole(role);
+                                  }}
+                                  className="px-2 py-1 text-xs border rounded-md border-border/50 bg-background/50 text-muted-foreground hover:text-foreground"
                                 >
                                   {role}
                                 </button>
@@ -1358,33 +1361,123 @@ const CandidateDashboardContent = () => {
                             </div>
                           )}
                         </div>
-                        <Button
-                          onClick={startInterview}
-                          disabled={
-                            isGenerating ||
-                            kitLoading ||
-                            !jobRole.trim() ||
-                            (!!kitId && !linkedKit)
-                          }
-                          className="w-full gap-2 bg-linear-to-r from-primary to-primary-glow hover:opacity-90 transition-opacity shadow-[0_0_20px_-4px_hsl(var(--primary)/0.4)]"
-                          size="lg"
-                        >
-                          {isGenerating ? (
-                            <>
-                              <Loader2 className="w-4 h-4 animate-spin" />{" "}
-                              Preparing Interview...
-                            </>
-                          ) : (
-                            <>
-                              <Sparkles className="w-4 h-4" />{" "}
-                              {linkedKit
-                                ? "Start Kit Question"
-                                : "Start Interview"}
-                            </>
+                      ) : (
+                        <div className="px-4 py-3 text-sm border border-dashed rounded-2xl border-border/40 bg-secondary/10 text-muted-foreground">
+                          Upload a resume or add practice roles in Profile.
+                        </div>
+                      )}
+
+                      <Card className="glass-card glow-border">
+                        <CardHeader className="pb-4 text-center">
+                          <div className="w-20 h-20 rounded-2xl bg-linear-to-br from-primary/20 to-primary/5 flex items-center justify-center mx-auto mb-4 shadow-[0_0_30px_-8px_hsl(var(--primary)/0.3)]">
+                            <Bot className="w-10 h-10 text-primary" />
+                          </div>
+                          <CardTitle className="text-xl font-display">
+                            {linkedKit
+                              ? "Start Interview Kit"
+                              : "Start Practice Session"}
+                          </CardTitle>
+                          <p className="text-sm text-muted-foreground">
+                            {linkedKit
+                              ? "Answer this company question on video and get instant feedback."
+                              : "Our AI interviewer will ask you a question. Record your answer and get instant feedback."}
+                          </p>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                          {kitLoading && (
+                            <div className="flex items-center gap-2 px-4 py-3 text-sm border rounded-xl border-border/50 bg-secondary/30 text-muted-foreground">
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              Loading interview kit...
+                            </div>
                           )}
-                        </Button>
-                      </CardContent>
-                    </Card>
+
+                          {kitError && (
+                            <div className="px-4 py-3 text-sm border rounded-xl border-destructive/30 bg-destructive/10 text-destructive">
+                              {kitError}
+                            </div>
+                          )}
+
+                          {linkedKit && (
+                            <div className="px-4 py-3 border rounded-xl border-primary/20 bg-primary/10">
+                              <div className="flex items-start gap-3">
+                                <FileText className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                                <div>
+                                  <p className="text-sm font-medium text-foreground">
+                                    {linkedKit.title}
+                                  </p>
+                                  <p className="mt-1 text-xs text-muted-foreground">
+                                    Question {activeKitQuestionIndex + 1} of{" "}
+                                    {linkedKit.questions.length}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          <div>
+                            <label className="block mb-2 text-sm font-medium text-foreground">
+                              Practice Role(s)
+                            </label>
+                            <Input
+                              value={jobRole}
+                              onChange={(e) => setJobRole(e.target.value)}
+                              placeholder="e.g. Software Engineer, Product Manager"
+                              disabled={!!linkedKit}
+                              className="bg-secondary/50 border-border/50 focus:border-primary/50 focus:ring-primary/20"
+                            />
+                            {!linkedKit && practiceRolePool.length > 0 && (
+                              <p className="mt-2 text-xs text-muted-foreground">
+                                Randomized across {practiceRolePool.join(", ")}
+                              </p>
+                            )}
+                            {!linkedKit && profileRoles.length > 0 && (
+                              <div className="flex flex-wrap gap-2 mt-3">
+                                {profileRoles.map((role) => (
+                                  <button
+                                    key={role}
+                                    type="button"
+                                    onClick={() => setJobRole(role)}
+                                    className={`px-2 py-1 text-xs border rounded-md transition-colors ${
+                                      jobRole.trim().toLowerCase() ===
+                                      role.toLowerCase()
+                                        ? "border-primary/60 bg-primary/10 text-primary"
+                                        : "border-border/50 bg-secondary/30 text-muted-foreground hover:text-foreground"
+                                    }`}
+                                  >
+                                    {role}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                          <Button
+                            onClick={startInterview}
+                            disabled={
+                              isGenerating ||
+                              kitLoading ||
+                              (!linkedKit && practiceRolePool.length === 0) ||
+                              (!!kitId && !linkedKit)
+                            }
+                            className="w-full gap-2 bg-linear-to-r from-primary to-primary-glow hover:opacity-90 transition-opacity shadow-[0_0_20px_-4px_hsl(var(--primary)/0.4)]"
+                            size="lg"
+                          >
+                            {isGenerating ? (
+                              <>
+                                <Loader2 className="w-4 h-4 animate-spin" />{" "}
+                                Preparing Interview...
+                              </>
+                            ) : (
+                              <>
+                                <Sparkles className="w-4 h-4" />{" "}
+                                {linkedKit
+                                  ? "Start Kit Question"
+                                  : "Start Interview"}
+                              </>
+                            )}
+                          </Button>
+                        </CardContent>
+                      </Card>
+                    </div>
                   </motion.div>
                 )}
 
@@ -1426,51 +1519,57 @@ const CandidateDashboardContent = () => {
 
                     {mediaUnavailableMessage && !recorder.stream && (
                       <div className="max-w-3xl p-4 mx-auto text-sm border rounded-xl border-yellow-500/30 bg-yellow-500/10 text-foreground">
-                        <p className="font-medium">Recording needs permission</p>
+                        <p className="font-medium">
+                          Recording needs permission
+                        </p>
                         <p className="mt-1 text-muted-foreground">
                           {mediaUnavailableMessage}
                         </p>
                       </div>
                     )}
 
-                    <div className="max-w-3xl p-4 mx-auto space-y-2 border rounded-xl border-border/50 bg-secondary/20">
-                      <div className="flex items-center justify-between gap-3">
-                        <label
-                          htmlFor="answer-transcript"
-                          className="text-sm font-medium text-foreground"
-                        >
-                          Text answer / transcript
-                        </label>
-                        {isTranscribing && (
-                          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            Transcribing...
-                          </span>
-                        )}
+                    {(mediaUnavailableMessage ||
+                      transcriptionError ||
+                      manualTranscriptEditedRef.current) && (
+                      <div className="max-w-3xl p-4 mx-auto space-y-2 border rounded-xl border-border/50 bg-secondary/20">
+                        <div className="flex items-center justify-between gap-3">
+                          <label
+                            htmlFor="answer-transcript"
+                            className="text-sm font-medium text-foreground"
+                          >
+                            Text answer / transcript
+                          </label>
+                          {isTranscribing && (
+                            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              Transcribing...
+                            </span>
+                          )}
+                        </div>
+                        <Textarea
+                          id="answer-transcript"
+                          value={answerTranscript}
+                          onChange={(event) => {
+                            manualTranscriptEditedRef.current = true;
+                            setAnswerTranscript(event.target.value);
+                            if (transcriptionError) {
+                              setTranscriptionError(null);
+                            }
+                          }}
+                          placeholder="Use this only if recording is unavailable or automatic transcription fails."
+                          className="resize-y min-h-32 bg-background/70"
+                        />
+                        {transcriptionError ? (
+                          <p className="text-xs text-destructive">
+                            {transcriptionError}
+                          </p>
+                        ) : answerTranscript.trim() ? (
+                          <p className="text-xs text-muted-foreground">
+                            {countWords(answerTranscript)} words captured.
+                          </p>
+                        ) : null}
                       </div>
-                      <Textarea
-                        id="answer-transcript"
-                        value={answerTranscript}
-                        onChange={(event) => {
-                          manualTranscriptEditedRef.current = true;
-                          setAnswerTranscript(event.target.value);
-                          if (transcriptionError) {
-                            setTranscriptionError(null);
-                          }
-                        }}
-                        placeholder="Type your answer here or edit the generated transcript before submitting."
-                        className="resize-y min-h-32 bg-background/70"
-                      />
-                      {transcriptionError ? (
-                        <p className="text-xs text-destructive">
-                          {transcriptionError}
-                        </p>
-                      ) : answerTranscript.trim() ? (
-                        <p className="text-xs text-muted-foreground">
-                          {countWords(answerTranscript)} words captured.
-                        </p>
-                      ) : null}
-                    </div>
+                    )}
 
                     <div className="flex justify-center gap-3">
                       <Button
@@ -1481,24 +1580,30 @@ const CandidateDashboardContent = () => {
                         Cancel
                       </Button>
                       {!recorder.isRecording &&
-                        (recorder.recordedUrl || answerTranscript.trim()) && (
-                        <Button
-                          onClick={handleSubmitAnswer}
-                          disabled={isSubmittingAnswer}
-                          className="gap-2 bg-linear-to-r from-primary to-primary-glow hover:opacity-90 shadow-[0_0_20px_-4px_hsl(var(--primary)/0.4)]"
-                        >
-                          {isSubmittingAnswer ? (
-                            <>
-                              <Loader2 className="w-4 h-4 animate-spin" />
-                              {isTranscribing ? "Transcribing..." : "Submitting..."}
-                            </>
-                          ) : (
-                            <>
-                              <Send className="w-4 h-4" /> Submit for Feedback
-                            </>
-                          )}
-                        </Button>
-                      )}
+                        (recorder.recordedUrl ||
+                          ((mediaUnavailableMessage ||
+                            transcriptionError ||
+                            manualTranscriptEditedRef.current) &&
+                            answerTranscript.trim())) && (
+                          <Button
+                            onClick={handleSubmitAnswer}
+                            disabled={isSubmittingAnswer}
+                            className="gap-2 bg-linear-to-r from-primary to-primary-glow hover:opacity-90 shadow-[0_0_20px_-4px_hsl(var(--primary)/0.4)]"
+                          >
+                            {isSubmittingAnswer ? (
+                              <>
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                                {isTranscribing
+                                  ? "Transcribing..."
+                                  : "Submitting..."}
+                              </>
+                            ) : (
+                              <>
+                                <Send className="w-4 h-4" /> Submit for Feedback
+                              </>
+                            )}
+                          </Button>
+                        )}
                     </div>
                   </motion.div>
                 )}
