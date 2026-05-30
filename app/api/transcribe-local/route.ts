@@ -119,13 +119,10 @@ function getGeminiModelsToTry() {
   return Array.from(
     new Set(
       [
-        process.env.GEMINI_TRANSCRIPTION_MODEL,
-        process.env.GEMINI_MODEL,
-        "gemini-2.5-flash-lite",
+        process.env.GEMINI_TRANSCRIPTION_MODEL?.trim(),
         "gemini-2.5-flash",
-        "gemini-2.0-flash-lite",
         "gemini-2.0-flash",
-      ].filter((model): model is string => Boolean(model?.trim())),
+      ].filter(Boolean) as string[],
     ),
   );
 }
@@ -232,7 +229,23 @@ async function runWhisperScript(
     "transcribe_whisper.py",
   );
   const model = process.env.WHISPER_MODEL || "base";
+  const venvPython =
+    process.platform === "win32"
+      ? path.join(process.cwd(), ".venv", "Scripts", "python.exe")
+      : path.join(process.cwd(), ".venv", "bin", "python");
   const commands: Array<{ cmd: string; args: string[] }> = [
+    {
+      cmd: venvPython,
+      args: [
+        scriptPath,
+        "--input",
+        filePath,
+        "--model",
+        model,
+        "--language",
+        language,
+      ],
+    },
     {
       cmd: "python",
       args: [
@@ -260,7 +273,7 @@ async function runWhisperScript(
     },
   ];
 
-  let lastError: string | null = null;
+  const errors: string[] = [];
 
   for (const command of commands) {
     try {
@@ -271,14 +284,26 @@ async function runWhisperScript(
       const parsed = JSON.parse(stdout) as TranscriptionResult;
       return parsed;
     } catch (error) {
-      lastError = getScriptErrorMessage(error);
+      errors.push(`${command.cmd}: ${getScriptErrorMessage(error)}`);
     }
   }
 
   throw new Error(
-    lastError ||
-      "Failed to run local Whisper. Install Python and dependencies from requirements-whisper.txt.",
+    errors.length > 0
+      ? errors.join(" ")
+      : "Failed to run local Whisper. Install Python and dependencies from requirements-whisper.txt.",
   );
+}
+
+function transcriptionResponse(result: TranscriptionResult, language: string) {
+  return NextResponse.json({
+    text: result.text || "",
+    language: result.language || language,
+    duration: result.duration ?? null,
+    confidence:
+      typeof result.confidence === "number" ? result.confidence : null,
+    engine: result.engine || "faster-whisper",
+  });
 }
 
 export async function POST(req: NextRequest) {
@@ -306,8 +331,35 @@ export async function POST(req: NextRequest) {
     const mimeType = getMimeType(file);
     let geminiError: string | null = null;
     let whisperError: string | null = null;
+    const transcriptionProvider =
+      process.env.TRANSCRIPTION_PROVIDER?.toLowerCase();
+    const preferGemini =
+      transcriptionProvider === "gemini" ||
+      transcriptionProvider === "google" ||
+      transcriptionProvider === "cloud-gemini";
+    const preferGeminiWithWhisper =
+      transcriptionProvider === "gemini-with-whisper" ||
+      transcriptionProvider === "gemini-whisper" ||
+      transcriptionProvider === "gemini+whisper";
+    const preferWhisper =
+      transcriptionProvider === "whisper" ||
+      transcriptionProvider === "local-whisper" ||
+      transcriptionProvider === "faster-whisper";
 
     const geminiModels = getGeminiModelsToTry();
+
+    if (preferWhisper) {
+      await fs.writeFile(tempFilePath, bytes);
+
+      try {
+        return transcriptionResponse(
+          await runWhisperScript(tempFilePath, language),
+          language,
+        );
+      } catch (error) {
+        whisperError = error instanceof Error ? error.message : String(error);
+      }
+    }
 
     if (process.env.GEMINI_API_KEY) {
       const geminiErrors: string[] = [];
@@ -347,28 +399,28 @@ export async function POST(req: NextRequest) {
       geminiError = "GEMINI_API_KEY is not configured.";
     }
 
-    await fs.writeFile(tempFilePath, bytes);
-
-    let result: TranscriptionResult;
-    try {
-      result = await runWhisperScript(tempFilePath, language);
-    } catch (error) {
-      whisperError = error instanceof Error ? error.message : String(error);
-      const setupHint =
-        "Configure GEMINI_API_KEY for cloud transcription, or install local Whisper dependencies and FFmpeg.";
-      throw new Error(
-        [geminiError, whisperError, setupHint].filter(Boolean).join(" "),
-      );
+    if (preferGemini && !preferGeminiWithWhisper) {
+      throw new Error(geminiError);
     }
 
-    return NextResponse.json({
-      text: result.text || "",
-      language: result.language || language,
-      duration: result.duration ?? null,
-      confidence:
-        typeof result.confidence === "number" ? result.confidence : null,
-      engine: result.engine || "faster-whisper",
-    });
+    if (!preferWhisper) {
+      await fs.writeFile(tempFilePath, bytes);
+
+      try {
+        return transcriptionResponse(
+          await runWhisperScript(tempFilePath, language),
+          language,
+        );
+      } catch (error) {
+        whisperError = error instanceof Error ? error.message : String(error);
+      }
+    }
+
+    const setupHint =
+      "Configure GEMINI_API_KEY for cloud transcription, or install local Whisper dependencies and FFmpeg.";
+    throw new Error(
+      [geminiError, whisperError, setupHint].filter(Boolean).join(" "),
+      );
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Unknown transcription error";

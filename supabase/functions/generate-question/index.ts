@@ -307,7 +307,7 @@ DenoRuntime.serve(async (req: Request) => {
     const openAIModel = DenoRuntime.env.get("OPENAI_MODEL") || "gpt-5.2";
     const geminiKey = DenoRuntime.env.get("GEMINI_API_KEY");
     const geminiModel =
-      DenoRuntime.env.get("GEMINI_MODEL") || "gemini-2.0-flash";
+      DenoRuntime.env.get("GEMINI_MODEL") || "gemini-2.5-flash-lite";
     const providerPreference =
       DenoRuntime.env.get("AI_PROVIDER")?.toLowerCase() || "openai";
     const providerOrder =
@@ -342,9 +342,10 @@ DenoRuntime.serve(async (req: Request) => {
       if (provider === "gemini" && geminiKey) {
         const modelsToTry = [
           geminiModel,
+          "gemini-2.5-flash-lite",
           "gemini-2.0-flash",
           "gemini-1.5-flash-latest",
-        ];
+        ].filter((model, index, models) => models.indexOf(model) === index);
 
         for (const model of modelsToTry) {
           attemptedProviders.push(`gemini:${model}`);

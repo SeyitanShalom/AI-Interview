@@ -67,7 +67,7 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const MIN_TRANSCRIPT_WORDS = 1;
+const MIN_TRANSCRIPT_WORDS = 12;
 
 function jsonResponse(payload: unknown, status = 200) {
   return new Response(JSON.stringify(payload), {
@@ -143,6 +143,36 @@ function scoreFromTranscript(words: number, hasMetrics: boolean) {
   return { content, structure, clarity, impact, confidence };
 }
 
+function buildInsufficientTranscriptFeedback(
+  question: string,
+  words: number,
+): Feedback {
+  return {
+    rubric_scores: {
+      content: 0,
+      structure: 0,
+      clarity: 0,
+      impact: 0,
+      confidence: 0,
+    },
+    content_score: 0,
+    style_score: 0,
+    overall_score: 0,
+    summary:
+      words > 0
+        ? `Only ${words} transcript words were captured, which is not enough speech to evaluate accurately. Please record the answer again or enter the transcript manually.`
+        : "No speech transcript was captured, so this answer cannot be evaluated accurately. Please record the answer again or enter the transcript manually.",
+    strengths: [],
+    improvements: [
+      "Record a complete spoken answer before submitting for feedback.",
+      "If automatic transcription misses your answer, paste the transcript manually and submit again.",
+    ],
+    content_analysis: `Question analyzed: ${question}. There was not enough transcript evidence to score the answer.`,
+    style_analysis:
+      "Style cannot be assessed until enough speech is captured in the transcript.",
+  };
+}
+
 function buildFallbackFeedback(
   jobRole: string,
   question: string,
@@ -150,10 +180,15 @@ function buildFallbackFeedback(
 ): Feedback {
   const normalizedTranscript = normalizeText(transcript);
   const words = countWords(normalizedTranscript);
-  const hasTranscript = words > 0;
+  const hasTranscript = words >= MIN_TRANSCRIPT_WORDS;
   const hasMetrics = /(\d+|percent|revenue|users|customers|latency|cost|time|growth|conversion|accuracy|quality)/i.test(
     normalizedTranscript,
   );
+
+  if (!hasTranscript) {
+    return buildInsufficientTranscriptFeedback(question, words);
+  }
+
   const rubric = scoreFromTranscript(words, hasMetrics);
   const contentScore = clampScore(
     rubric.content * 0.5 + rubric.structure * 0.3 + rubric.impact * 0.2,

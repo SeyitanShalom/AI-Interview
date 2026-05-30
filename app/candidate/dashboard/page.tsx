@@ -154,6 +154,8 @@ const readJsonResponse = async <T,>(response: Response) => {
 const countWords = (value: string) =>
   value.trim().split(/\s+/).filter(Boolean).length;
 
+const MIN_EVALUATION_WORDS = 12;
+
 const clampScore = (value: number) =>
   Math.max(0, Math.min(100, Math.round(value)));
 
@@ -203,22 +205,49 @@ const buildFallbackFeedback = (
   transcript: string,
 ): Feedback => {
   const words = countWords(transcript);
-  const hasTranscript = words > 0;
+  const hasTranscript = words >= MIN_EVALUATION_WORDS;
+
+  if (!hasTranscript) {
+    return {
+      rubric_scores: {
+        content: 0,
+        structure: 0,
+        clarity: 0,
+        impact: 0,
+        confidence: 0,
+      },
+      content_score: 0,
+      style_score: 0,
+      overall_score: 0,
+      summary:
+        words > 0
+          ? `Only ${words} transcript words were captured, which is not enough speech to evaluate accurately. Please record your answer again or enter the transcript manually.`
+          : "No speech transcript was captured, so this answer cannot be evaluated accurately. Please record your answer again or enter the transcript manually.",
+      strengths: [],
+      improvements: [
+        "Record a complete spoken answer before submitting for feedback.",
+        "If automatic transcription misses your answer, paste the transcript manually and submit again.",
+      ],
+      content_analysis: `Role: ${jobRole}. Question analyzed: ${question}. There was not enough transcript evidence to score the answer.`,
+      style_analysis:
+        "Style cannot be assessed until enough speech is captured in the transcript.",
+    };
+  }
 
   const content = clampScore(
-    hasTranscript ? 45 + Math.min(words * 0.28, 35) : 45,
+    45 + Math.min(words * 0.28, 35),
   );
   const structure = clampScore(
-    hasTranscript ? 42 + Math.min(words * 0.24, 35) : 44,
+    42 + Math.min(words * 0.24, 35),
   );
   const clarity = clampScore(
-    hasTranscript ? 50 + Math.min(words * 0.18, 30) : 50,
+    50 + Math.min(words * 0.18, 30),
   );
   const impact = clampScore(
-    hasTranscript ? 38 + Math.min(words * 0.3, 38) : 40,
+    38 + Math.min(words * 0.3, 38),
   );
   const confidence = clampScore(
-    hasTranscript ? 52 + Math.min(words * 0.16, 28) : 52,
+    52 + Math.min(words * 0.16, 28),
   );
   const contentScore = clampScore(
     content * 0.5 + structure * 0.3 + impact * 0.2,
@@ -895,7 +924,10 @@ const CandidateDashboardContent = () => {
           : rawResponse.trim()
             ? `Local transcription failed (${response.status}): ${previewResponseText(rawResponse)}`
             : "Local transcription failed";
-      throw new Error(message);
+      console.warn("Automatic transcription failed:", message);
+      throw new Error(
+        "Automatic transcription could not detect your answer. Add the transcript below or try recording again.",
+      );
     }
 
     if (!payload) {
@@ -991,6 +1023,19 @@ const CandidateDashboardContent = () => {
         );
         toast.error("Transcript needed", {
           description: "Add the transcript below and submit again.",
+        });
+        return;
+      }
+
+      const transcriptWordCount = countWords(transcriptForFeedback);
+      if (transcriptWordCount < MIN_EVALUATION_WORDS) {
+        const message =
+          transcriptWordCount > 0
+            ? `Only ${transcriptWordCount} words were captured. Record a fuller answer or edit the transcript before submitting.`
+            : "No speech was captured. Record your answer again or enter the transcript manually.";
+        setTranscriptionError(message);
+        toast.error("Not enough speech to evaluate", {
+          description: `At least ${MIN_EVALUATION_WORDS} transcript words are needed for accurate feedback.`,
         });
         return;
       }
