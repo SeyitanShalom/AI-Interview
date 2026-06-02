@@ -123,7 +123,7 @@ const AnalyticsCharts = ({ sessions }: AnalyticsChartsProps) => {
   const chartConfig = {
     overall: { label: "Overall", color: "hsl(var(--primary))" },
     content: { label: "Content", color: "hsl(var(--accent))" },
-    style: { label: "Style", color: "hsl(var(--muted-foreground))" },
+    style: { label: "Clarity", color: "hsl(var(--muted-foreground))" },
     count: { label: "Sessions", color: "hsl(var(--primary))" },
   };
 

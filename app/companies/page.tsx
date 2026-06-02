@@ -32,7 +32,7 @@ const features = [
   {
     icon: BarChart3,
     title: "Candidate Analytics",
-    desc: "Compare candidates side-by-side with AI-scored responses, confidence metrics, and structured rubrics.",
+    desc: "Compare candidates side-by-side with AI-scored responses, clear metrics, and structured rubrics.",
   },
   {
     icon: Building2,
@@ -65,7 +65,7 @@ const steps = [
   {
     num: "04",
     title: "Evaluate Candidates",
-    desc: "Review AI-scored video responses and hire with confidence.",
+    desc: "Review AI-scored video responses and make better-informed hiring decisions.",
   },
 ];
 

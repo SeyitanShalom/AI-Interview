@@ -384,7 +384,9 @@ const CandidateReview = ({ sessions, profiles = [] }: CandidateReviewProps) => {
                         </div>
                         <div className="space-y-1.5">
                           <div className="flex justify-between text-xs">
-                            <span className="text-muted-foreground">Style</span>
+                            <span className="text-muted-foreground">
+                              Clarity
+                            </span>
                             <span className={scoreColor(feedback.style_score)}>
                               {feedback.style_score}%
                             </span>
@@ -495,7 +497,7 @@ const CandidateReview = ({ sessions, profiles = [] }: CandidateReviewProps) => {
                             </div>
                             <div className="p-3 space-y-1 border rounded-lg bg-secondary/20 border-border/10">
                               <h4 className="text-xs font-semibold text-foreground">
-                                Style Analysis
+                                Clarity Analysis
                               </h4>
                               <p className="text-xs text-muted-foreground">
                                 {feedback.style_analysis}

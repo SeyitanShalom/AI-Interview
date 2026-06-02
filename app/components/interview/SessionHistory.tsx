@@ -1,5 +1,11 @@
 import { motion } from "framer-motion";
-import { Clock, TrendingUp, ChevronRight, Trash2 } from "lucide-react";
+import {
+  CheckCircle,
+  Clock,
+  TrendingUp,
+  ChevronRight,
+  Trash2,
+} from "lucide-react";
 import { Card, CardContent } from "@/app/components/ui/card";
 import { Button } from "@/app/components/ui/button";
 import { format } from "date-fns";
@@ -11,6 +17,8 @@ interface Session {
   overall_score: number | null;
   status: string;
   created_at: string;
+  ai_feedback?: unknown | null;
+  completed_at?: string | null;
 }
 
 const SessionHistory = ({
@@ -32,13 +40,20 @@ const SessionHistory = ({
 
   return (
     <div className="space-y-3">
-      {sessions.map((session, i) => (
-        <motion.div
-          key={session.id}
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: i * 0.04 }}
-        >
+      {sessions.map((session, i) => {
+        const isCompleted =
+          session.status === "completed" ||
+          Boolean(session.ai_feedback) ||
+          session.overall_score !== null ||
+          Boolean(session.completed_at);
+
+        return (
+          <motion.div
+            key={session.id}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: i * 0.04 }}
+          >
           <Card className="glass-card hover:border-primary/25 transition-all group">
             <CardContent className="p-4 flex items-center justify-between">
               <div
@@ -67,7 +82,12 @@ const SessionHistory = ({
                     </span>
                   </div>
                 )}
-                {session.status === "pending" && (
+                {isCompleted ? (
+                  <span className="flex items-center gap-1 text-xs text-primary bg-primary/10 px-2.5 py-0.5 rounded-full border border-primary/15">
+                    <CheckCircle className="w-3 h-3" />
+                    Completed
+                  </span>
+                ) : (
                   <span className="text-xs text-yellow-400 bg-yellow-400/10 px-2.5 py-0.5 rounded-full border border-yellow-400/15">
                     In Progress
                   </span>
@@ -92,8 +112,9 @@ const SessionHistory = ({
               </div>
             </CardContent>
           </Card>
-        </motion.div>
-      ))}
+          </motion.div>
+        );
+      })}
     </div>
   );
 };

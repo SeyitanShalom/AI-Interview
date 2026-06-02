@@ -20,7 +20,6 @@ interface Feedback {
     structure: number;
     clarity: number;
     impact: number;
-    confidence: number;
   };
   content_score: number;
   style_score: number;
@@ -88,7 +87,7 @@ const FeedbackDisplay = ({ feedback }: { feedback: Feedback }) => {
               icon={MessageSquare}
             />
             <ScoreBar
-              label="Communication Style"
+              label="Communication Clarity"
               score={feedback.style_score}
               icon={Mic2}
             />
@@ -128,11 +127,6 @@ const FeedbackDisplay = ({ feedback }: { feedback: Feedback }) => {
               label="Impact"
               score={feedback.rubric_scores.impact}
               icon={CheckCircle}
-            />
-            <ScoreBar
-              label="Confidence"
-              score={feedback.rubric_scores.confidence}
-              icon={AlertCircle}
             />
           </CardContent>
         </Card>
@@ -206,7 +200,7 @@ const FeedbackDisplay = ({ feedback }: { feedback: Feedback }) => {
         <Card className="glass-card">
           <CardHeader className="pb-3">
             <CardTitle className="text-base font-display">
-              Style Analysis
+              Clarity Analysis
             </CardTitle>
           </CardHeader>
           <CardContent>

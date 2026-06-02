@@ -9,7 +9,7 @@ const DEFAULT_REDIRECT = "/";
 export const dynamic = "force-dynamic";
 
 function safeNextPath(rawNext: string | null): string {
-  if (!rawNext || !rawNext.startsWith("/")) {
+  if (!rawNext || !rawNext.startsWith("/") || rawNext.startsWith("//")) {
     return DEFAULT_REDIRECT;
   }
 

@@ -28,7 +28,7 @@ const features = [
   {
     icon: MessageSquare,
     title: "Real-Time Feedback",
-    desc: "Get instant AI analysis on your answers — covering clarity, relevance, structure, and confidence.",
+    desc: "Get instant AI analysis on your answers — covering clarity, relevance, structure, and impact.",
   },
   {
     icon: BarChart3,
@@ -117,8 +117,7 @@ const ForCandidates = () => {
             className="max-w-2xl mx-auto mb-10 text-sm leading-relaxed md:text-lg text-muted-foreground"
           >
             Practice realistic mock interviews with AI, get actionable feedback
-            on every answer, and walk into your next interview with unshakeable
-            confidence.
+            on every answer, and walk into your next interview prepared.
           </motion.p>
 
           <motion.div

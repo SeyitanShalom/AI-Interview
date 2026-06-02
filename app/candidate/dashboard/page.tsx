@@ -60,7 +60,6 @@ interface Feedback {
     structure: number;
     clarity: number;
     impact: number;
-    confidence: number;
   };
   content_score: number;
   style_score: number;
@@ -77,10 +76,13 @@ interface Session {
   job_role: string;
   question: string;
   overall_score: number | null;
+  content_score?: number | null;
+  style_score?: number | null;
   status: string;
   created_at: string;
   ai_feedback: Feedback | null;
   video_url: string | null;
+  completed_at?: string | null;
 }
 
 interface InterviewKit {
@@ -151,6 +153,18 @@ const readJsonResponse = async <T,>(response: Response) => {
   }
 };
 
+const getAuthHeaders = async () => {
+  const sessionRes = await supabase.auth.getSession();
+  const token = sessionRes?.data?.session?.access_token ?? null;
+  const headers: Record<string, string> = {};
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  return headers;
+};
+
 const countWords = (value: string) =>
   value.trim().split(/\s+/).filter(Boolean).length;
 
@@ -214,7 +228,6 @@ const buildFallbackFeedback = (
         structure: 0,
         clarity: 0,
         impact: 0,
-        confidence: 0,
       },
       content_score: 0,
       style_score: 0,
@@ -230,7 +243,7 @@ const buildFallbackFeedback = (
       ],
       content_analysis: `Role: ${jobRole}. Question analyzed: ${question}. There was not enough transcript evidence to score the answer.`,
       style_analysis:
-        "Style cannot be assessed until enough speech is captured in the transcript.",
+        "Clarity cannot be assessed until enough speech is captured in the transcript.",
     };
   }
 
@@ -246,17 +259,14 @@ const buildFallbackFeedback = (
   const impact = clampScore(
     38 + Math.min(words * 0.3, 38),
   );
-  const confidence = clampScore(
-    52 + Math.min(words * 0.16, 28),
-  );
   const contentScore = clampScore(
     content * 0.5 + structure * 0.3 + impact * 0.2,
   );
-  const styleScore = clampScore(clarity * 0.6 + confidence * 0.4);
+  const styleScore = clarity;
   const overallScore = clampScore(contentScore * 0.6 + styleScore * 0.4);
 
   return {
-    rubric_scores: { content, structure, clarity, impact, confidence },
+    rubric_scores: { content, structure, clarity, impact },
     content_score: contentScore,
     style_score: styleScore,
     overall_score: overallScore,
@@ -274,8 +284,58 @@ const buildFallbackFeedback = (
     ],
     content_analysis: `Role: ${jobRole}. Question analyzed: ${question}. The transcript supports a baseline review; stronger examples and measurable outcomes would improve the content score.`,
     style_analysis:
-      "Aim for confident pacing, clear sentence structure, and a direct closing statement.",
+      "Aim for clear pacing, concise sentence structure, and a direct closing statement.",
   };
+};
+
+const saveSessionFeedback = async ({
+  sessionId,
+  feedback,
+  completedAt,
+  videoUrl,
+}: {
+  sessionId: string;
+  feedback: Feedback;
+  completedAt: string;
+  videoUrl?: string | null;
+}) => {
+  const modernPatch = {
+    ai_feedback: feedback,
+    content_score: feedback.content_score,
+    style_score: feedback.style_score,
+    overall_score: feedback.overall_score,
+    status: "completed",
+    completed_at: completedAt,
+    ...(videoUrl ? { video_url: videoUrl } : {}),
+  };
+
+  const modernResult = await supabase
+    .from("interview_sessions")
+    .update(modernPatch)
+    .eq("id", sessionId)
+    .select()
+    .single();
+
+  if (!modernResult.error) return modernResult;
+
+  console.warn(
+    "Completed session save failed; retrying with base feedback columns.",
+    modernResult.error,
+  );
+
+  const basePatch = {
+    ai_feedback: feedback,
+    overall_score: feedback.overall_score,
+    status: "completed",
+    ...(videoUrl ? { video_url: videoUrl } : {}),
+  };
+
+  return supabase
+    .from("interview_sessions")
+    .update(basePatch)
+    .eq("id", sessionId)
+    .select()
+    .single();
 };
 
 const CandidateDashboardContent = () => {
@@ -945,6 +1005,40 @@ const CandidateDashboardContent = () => {
     };
   }, []);
 
+  const uploadRecording = useCallback(
+    async (blob: Blob, sessionId: string) => {
+      const formData = new FormData();
+      formData.append("file", blob, "answer.webm");
+      formData.append("sessionId", sessionId);
+
+      const response = await fetch("/api/candidate/recording", {
+        method: "POST",
+        headers: await getAuthHeaders(),
+        body: formData,
+      });
+      const { data: payload, text: rawResponse } = await readJsonResponse<{
+        publicUrl?: string;
+        error?: string;
+      }>(response);
+
+      if (!response.ok) {
+        throw new Error(
+          payload?.error ||
+            (rawResponse.trim()
+              ? `Recording upload failed (${response.status}): ${previewResponseText(rawResponse)}`
+              : "Recording upload failed"),
+        );
+      }
+
+      if (!payload?.publicUrl) {
+        throw new Error("Recording upload did not return a video URL.");
+      }
+
+      return payload.publicUrl;
+    },
+    [],
+  );
+
   const handleSubmitAnswer = async () => {
     if (!currentSessionId || isSubmittingAnswer) {
       return;
@@ -1042,34 +1136,14 @@ const CandidateDashboardContent = () => {
 
       setStep("analyzing");
 
+      let uploadedVideoUrl: string | null = null;
+
       if (recorder.recordedBlob) {
-        const filePath = `${user.id}/${currentSessionId}.webm`;
         try {
-          const { error: uploadError } = await supabase.storage
-            .from("interview-recordings")
-            .upload(filePath, recorder.recordedBlob, {
-              contentType: recorder.recordedBlob.type || "video/webm",
-              upsert: true,
-              cacheControl: "0",
-            });
-          if (uploadError) {
-            throw new Error(
-              uploadError.message || "Failed to upload recording",
-            );
-          }
-
-          const { data: urlData } = supabase.storage
-            .from("interview-recordings")
-            .getPublicUrl(filePath);
-
-          const { error: updateVideoError } = await supabase
-            .from("interview_sessions")
-            .update({ video_url: urlData.publicUrl })
-            .eq("id", currentSessionId);
-
-          if (updateVideoError) {
-            console.warn("Recording URL update failed:", updateVideoError);
-          }
+          uploadedVideoUrl = await uploadRecording(
+            recorder.recordedBlob,
+            currentSessionId,
+          );
         } catch (uploadError) {
           console.warn("Recording upload failed:", uploadError);
           toast.warning("Recording upload skipped", {
@@ -1118,22 +1192,6 @@ const CandidateDashboardContent = () => {
           transcriptForFeedback,
         );
         usedFallbackFeedback = true;
-
-        const { error: updateFeedbackError } = await supabase
-          .from("interview_sessions")
-          .update({
-            ai_feedback: nextFeedback,
-            content_score: nextFeedback.content_score,
-            style_score: nextFeedback.style_score,
-            overall_score: nextFeedback.overall_score,
-            status: "completed",
-            completed_at: new Date().toISOString(),
-          })
-          .eq("id", currentSessionId);
-
-        if (updateFeedbackError) {
-          console.warn("Fallback feedback save failed:", updateFeedbackError);
-        }
       }
 
       if (usedFallbackFeedback) {
@@ -1143,6 +1201,45 @@ const CandidateDashboardContent = () => {
         });
       }
 
+      if (!nextFeedback) {
+        throw new Error("Feedback could not be generated");
+      }
+
+      const completedAt = new Date().toISOString();
+      const { data: completedSession, error: completedSessionError } =
+        await saveSessionFeedback({
+          sessionId: currentSessionId,
+          feedback: nextFeedback,
+          completedAt,
+          videoUrl: uploadedVideoUrl,
+        });
+
+      if (completedSessionError) {
+        console.warn("Completed session save failed:", completedSessionError);
+      }
+
+      const completedSessionRecord =
+        (completedSession as unknown as Partial<Session> | null) ?? {};
+      const sessionForHistory = {
+        ...completedSessionRecord,
+        id: currentSessionId,
+        job_role: completedSessionRecord.job_role ?? feedbackRole,
+        question: completedSessionRecord.question ?? currentQuestion,
+        overall_score: nextFeedback.overall_score,
+        content_score: nextFeedback.content_score,
+        style_score: nextFeedback.style_score,
+        status: "completed",
+        created_at:
+          completedSessionRecord.created_at ?? new Date().toISOString(),
+        ai_feedback: nextFeedback,
+        video_url: completedSessionRecord.video_url ?? uploadedVideoUrl,
+        completed_at: completedAt,
+      } as Session;
+
+      setSessions((previousSessions) => [
+        sessionForHistory,
+        ...previousSessions.filter((session) => session.id !== currentSessionId),
+      ]);
       setFeedback(nextFeedback);
       setStep("feedback");
     } catch (e: unknown) {
@@ -1241,33 +1338,6 @@ const CandidateDashboardContent = () => {
         <div className="absolute bottom-1/4 left-0 w-100 h-100 bg-primary/2 rounded-full blur-[100px]" />
       </div>
 
-      {/* Navbar */}
-      {/* <nav className="sticky top-0 z-50 border-b border-border/50 bg-card/30 backdrop-blur-xl">
-        <div className="container flex items-center justify-between h-16 px-6 mx-auto">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary to-primary-glow flex items-center justify-center shadow-[0_0_20px_-4px_hsl(var(--primary)/0.4)]">
-              <Video className="w-4 h-4 text-primary-foreground" />
-            </div>
-            <span className="text-lg font-bold tracking-tight font-display">
-              InterviewAI
-            </span>
-          </div>
-          <div className="flex items-center gap-4">
-            <span className="hidden text-sm text-muted-foreground sm:inline">
-              {user?.email}
-            </span>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleSignOut}
-              className="gap-2 text-muted-foreground hover:text-foreground"
-            >
-              <LogOut className="w-4 h-4" /> Sign Out
-            </Button>
-          </div>
-        </div>
-      </nav> */}
-
       <div className="container relative z-10 max-w-5xl px-6 py-10 mx-auto mt-28">
         {/* Past session feedback view */}
         {selectedSession && (
@@ -1300,29 +1370,41 @@ const CandidateDashboardContent = () => {
                 Delete
               </Button>
             </div>
-            {selectedSession.video_url && (
-              <div className="mb-6 overflow-hidden bg-black rounded-2xl aspect-video ring-1 ring-border/30">
-                <video
-                  src={selectedSession.video_url}
-                  controls
-                  className="object-cover w-full h-full"
-                />
+            <div
+              className={
+                selectedSession.video_url
+                  ? "grid gap-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:items-start"
+                  : "space-y-6"
+              }
+            >
+              {selectedSession.video_url && (
+                <div className="overflow-hidden bg-black rounded-2xl aspect-video ring-1 ring-border/30 lg:sticky lg:top-24">
+                  <video
+                    src={selectedSession.video_url}
+                    controls
+                    className="object-cover w-full h-full"
+                  />
+                </div>
+              )}
+              <div className="min-w-0">
+                {selectedSession.ai_feedback ? (
+                  <FeedbackDisplay
+                    feedback={
+                      selectedSession.ai_feedback as unknown as Feedback
+                    }
+                  />
+                ) : (
+                  <Card className="glass-card">
+                    <CardContent className="py-12 text-center">
+                      <p className="text-muted-foreground">
+                        Feedback for this session is not yet available or could
+                        not be generated.
+                      </p>
+                    </CardContent>
+                  </Card>
+                )}
               </div>
-            )}
-            {selectedSession.ai_feedback ? (
-              <FeedbackDisplay
-                feedback={selectedSession.ai_feedback as unknown as Feedback}
-              />
-            ) : (
-              <Card className="glass-card">
-                <CardContent className="py-12 text-center">
-                  <p className="text-muted-foreground">
-                    Feedback for this session is not yet available or could not
-                    be generated.
-                  </p>
-                </CardContent>
-              </Card>
-            )}
+            </div>
           </motion.div>
         )}
 

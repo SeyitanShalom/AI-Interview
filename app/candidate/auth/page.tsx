@@ -49,6 +49,14 @@ const CandidateAuth = () => {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     setRedirectTo(params.get("redirect"));
+
+    const error = params.get("error");
+    if (error) {
+      setStatus({
+        type: "error",
+        message: error,
+      });
+    }
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {

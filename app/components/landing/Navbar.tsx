@@ -1,34 +1,56 @@
 "use client";
 
 import { Button } from "@/app/components/ui/button";
-import { Video, Menu, X } from "lucide-react";
+import { Video, Menu, X, LogOut } from "lucide-react";
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { useRouter, usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth";
 
+const marketingLinks = [
+  { href: "/", label: "Home" },
+  { href: "/candidates", label: "For Candidates" },
+  { href: "/companies", label: "For Companies" },
+];
+
 const Navbar = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const { signOut } = useAuth();
+  const { user, signOut } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
-
-  const isDashboard =
+  const role =
+    typeof user?.user_metadata?.role === "string"
+      ? user.user_metadata.role
+      : null;
+  const isCandidateApp =
     pathname?.startsWith("/candidate/dashboard") ||
-    pathname?.startsWith("/company/dashboard");
+    pathname?.startsWith("/candidate/profile");
+  const isCompanyApp = pathname?.startsWith("/company/dashboard");
+  const isAppArea = isCandidateApp || isCompanyApp;
+  const navLinks = isAppArea ? [] : marketingLinks;
+  const logoHref = isCandidateApp
+    ? "/candidate/dashboard"
+    : isCompanyApp
+      ? "/company/dashboard"
+      : "/";
+  const dashboardHref =
+    role === "company" ? "/company/dashboard" : "/candidate/dashboard";
 
   const handleSignOut = async () => {
-    await signOut();
-    setMobileOpen(false);
-    router.replace("/");
-    router.refresh();
+    try {
+      await signOut();
+    } finally {
+      setMobileOpen(false);
+      router.replace("/");
+      router.refresh();
+    }
   };
 
   return (
     <nav className="fixed left-0 right-0 z-50 border-b top-2 md:left-10 md:right-10 border-border/40 dark:bg-primary/5 backdrop-blur-2xl rounded-2xl">
       <div className="container flex items-center justify-between h-16 px-6 mx-auto">
-        <Link href="/" className="flex items-center gap-2.5 group">
+        <Link href={logoHref} className="flex items-center gap-2.5 group">
           <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-primary ">
             <Video className="w-4.5 h-4.5 text-primary-foreground" />
           </div>
@@ -38,53 +60,56 @@ const Navbar = () => {
         </Link>
 
         <div className="items-center hidden gap-8 font-medium md:flex text-foreground">
-          <Link
-            href="/"
-            className="text-sm transition-all duration-200 hover:scale-110"
-          >
-            Home
-          </Link>
-          <Link
-            href="/candidates"
-            className="text-sm transition-all duration-200 hover:scale-110"
-          >
-            For Candidates
-          </Link>
-          <Link
-            href="/companies"
-            className="text-sm transition-all duration-200 hover:scale-110"
-          >
-            For Companies
-          </Link>
-          {/* <a
-            href="/pricing"
-            className="text-sm transition-all duration-200 hover:scale-110"
-          >
-            Pricing
-          </a> */}
+          {navLinks.map((link) => (
+            <Link
+              key={link.href}
+              href={link.href}
+              className="text-sm transition-all duration-200 hover:scale-110"
+            >
+              {link.label}
+            </Link>
+          ))}
         </div>
 
         <div className="items-center hidden gap-3 md:flex">
-          {isDashboard ? (
-            <Button
-              onClick={handleSignOut}
-              variant="ghost"
-              size="sm"
-              className="text-sm font-medium text-foreground hover:text-foreground"
-            >
-              Sign Out
-            </Button>
+          {isAppArea && user ? (
+            <>
+              <span className="text-sm truncate max-w-52 text-muted-foreground">
+                {user.email}
+              </span>
+              <Button
+                onClick={handleSignOut}
+                variant="ghost"
+                size="sm"
+                className="gap-2 text-sm font-medium text-foreground hover:text-foreground"
+              >
+                <LogOut className="w-4 h-4" />
+                Sign Out
+              </Button>
+            </>
           ) : (
             <>
-              <Link href="/candidate/auth">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-sm font-medium text-foreground hover:text-foreground"
-                >
-                  Log In
-                </Button>
-              </Link>
+              {user && role ? (
+                <Link href={dashboardHref}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-sm font-medium text-foreground hover:text-foreground"
+                  >
+                    Dashboard
+                  </Button>
+                </Link>
+              ) : (
+                <Link href="/candidate/auth">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-sm font-medium text-foreground hover:text-foreground"
+                  >
+                    Log In
+                  </Button>
+                </Link>
+              )}
               <Link href="/company/auth">
                 <Button
                   size="lg"
@@ -118,43 +143,48 @@ const Navbar = () => {
             className="overflow-hidden border-t md:hidden border-border/40 bg-background/95 backdrop-blur-2xl"
           >
             <div className="container flex flex-col gap-4 px-6 py-6 mx-auto">
-              <Link
-                href="/"
-                className="py-2 text-sm font-medium sm:text-base text-muted-foreground hover:text-foreground"
-              >
-                Home
-              </Link>
-              <Link
-                href="/candidates"
-                className="py-2 text-sm font-medium sm:text-base text-muted-foreground hover:text-foreground"
-              >
-                For Candidates
-              </Link>
-              <Link
-                href="/companies"
-                className="py-2 text-sm font-medium sm:text-base text-muted-foreground hover:text-foreground"
-              >
-                For Companies
-              </Link>
-              {/* <a
-                href="/pricing"
-                className="py-2 text-sm font-medium sm:text-base text-muted-foreground hover:text-foreground"
-              >
-                Pricing
-              </a> */}
+              {navLinks.map((link) => (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  onClick={() => setMobileOpen(false)}
+                  className="py-2 text-sm font-medium sm:text-base text-muted-foreground hover:text-foreground"
+                >
+                  {link.label}
+                </Link>
+              ))}
 
               <div className="flex gap-3 pt-2">
-                {isDashboard ? (
-                  <Button onClick={handleSignOut} variant="outline" size="sm">
-                    Sign Out
-                  </Button>
+                {isAppArea && user ? (
+                  <div className="flex flex-col w-full gap-3">
+                    <span className="text-sm truncate text-muted-foreground">
+                      {user.email}
+                    </span>
+                    <Button
+                      onClick={handleSignOut}
+                      variant="outline"
+                      size="sm"
+                      className="self-start gap-2"
+                    >
+                      <LogOut className="w-4 h-4" />
+                      Sign Out
+                    </Button>
+                  </div>
                 ) : (
                   <>
-                    <Link href="/candidate/auth">
-                      <Button variant="outline" size="sm">
-                        Log In
-                      </Button>
-                    </Link>
+                    {user && role ? (
+                      <Link href={dashboardHref}>
+                        <Button variant="outline" size="sm">
+                          Dashboard
+                        </Button>
+                      </Link>
+                    ) : (
+                      <Link href="/candidate/auth">
+                        <Button variant="outline" size="sm">
+                          Log In
+                        </Button>
+                      </Link>
+                    )}
                     <Link href="/company/auth">
                       <Button
                         size="sm"

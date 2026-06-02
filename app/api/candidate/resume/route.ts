@@ -50,6 +50,13 @@ type ResumeProfileResult = ResumeProfile & {
 };
 
 const RESUME_BUCKET = "resumes";
+const MAX_RESUME_BYTES = 8 * 1024 * 1024;
+const ALLOWED_RESUME_EXTENSIONS = new Set(["pdf", "doc", "docx"]);
+const ALLOWED_RESUME_MIME_TYPES = new Set([
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+]);
 
 type StorageResult = Promise<{ error: unknown | null }>;
 
@@ -175,6 +182,20 @@ function getResumeStoragePath(resumeUrl: string | null | undefined) {
 
   const fallbackPath = resumeUrl.split(`/${RESUME_BUCKET}/`)[1];
   return fallbackPath ? decodeURIComponent(fallbackPath.split("?")[0]) : null;
+}
+
+function getResumeExtension(filename: string) {
+  return filename.split(".").pop()?.toLowerCase() || "";
+}
+
+function isSupportedResumeFile(file: File, filename: string) {
+  const mimeType = file.type.split(";")[0]?.trim().toLowerCase() || "";
+  const extension = getResumeExtension(filename);
+
+  return (
+    ALLOWED_RESUME_EXTENSIONS.has(extension) &&
+    (!mimeType || ALLOWED_RESUME_MIME_TYPES.has(mimeType))
+  );
 }
 
 function createAdminClient() {
@@ -770,6 +791,20 @@ export async function POST(request: Request) {
 
     const ownerId = ownerResult.ownerId;
     const filename = file.name || `resume-${Date.now()}`;
+    if (!isSupportedResumeFile(file, filename)) {
+      return NextResponse.json(
+        { error: "Unsupported resume file type. Upload a PDF, DOC, or DOCX." },
+        { status: 400 },
+      );
+    }
+
+    if (file.size > MAX_RESUME_BYTES) {
+      return NextResponse.json(
+        { error: "Resume file is too large. Upload a file under 8 MB." },
+        { status: 413 },
+      );
+    }
+
     const safeFilename = filename.replace(/[^\w.\-]+/g, "-");
     const filePath = `${ownerId}/resume-${Date.now()}-${safeFilename}`;
 

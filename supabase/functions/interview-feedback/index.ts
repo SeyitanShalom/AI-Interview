@@ -7,7 +7,6 @@ type Feedback = {
     structure: number;
     clarity: number;
     impact: number;
-    confidence: number;
   };
   content_score: number;
   style_score: number;
@@ -138,9 +137,8 @@ function scoreFromTranscript(words: number, hasMetrics: boolean) {
   const structure = clampScore(34 + Math.min(words * 0.26, 36));
   const clarity = clampScore(42 + Math.min(words * 0.18, 34));
   const impact = clampScore(28 + Math.min(words * 0.28, 36) + (hasMetrics ? 10 : 0));
-  const confidence = clampScore(44 + Math.min(words * 0.16, 30));
 
-  return { content, structure, clarity, impact, confidence };
+  return { content, structure, clarity, impact };
 }
 
 function buildInsufficientTranscriptFeedback(
@@ -153,7 +151,6 @@ function buildInsufficientTranscriptFeedback(
       structure: 0,
       clarity: 0,
       impact: 0,
-      confidence: 0,
     },
     content_score: 0,
     style_score: 0,
@@ -169,7 +166,7 @@ function buildInsufficientTranscriptFeedback(
     ],
     content_analysis: `Question analyzed: ${question}. There was not enough transcript evidence to score the answer.`,
     style_analysis:
-      "Style cannot be assessed until enough speech is captured in the transcript.",
+      "Clarity cannot be assessed until enough speech is captured in the transcript.",
   };
 }
 
@@ -193,7 +190,7 @@ function buildFallbackFeedback(
   const contentScore = clampScore(
     rubric.content * 0.5 + rubric.structure * 0.3 + rubric.impact * 0.2,
   );
-  const styleScore = clampScore(rubric.clarity * 0.6 + rubric.confidence * 0.4);
+  const styleScore = rubric.clarity;
   const overallScore = clampScore(contentScore * 0.6 + styleScore * 0.4);
 
   return {
@@ -224,7 +221,7 @@ function buildFallbackFeedback(
     ],
     content_analysis: `Question analyzed: ${question}. The answer should be scored on evidence from the transcript, not on assumed resume experience.`,
     style_analysis:
-      "Aim for concise sentences, clear sequencing, and a confident closing takeaway.",
+      "Aim for concise sentences, clear sequencing, and a direct closing takeaway.",
   };
 }
 
@@ -270,11 +267,10 @@ Rubric, 0-100:
 - structure: logical flow, STAR organization, coherence
 - clarity: concise language, readability, specificity
 - impact: measurable outcomes, user/business value, ownership
-- confidence: decisive tone, poise, directness
 
 Weighting rules:
 - content_score = 50% content + 30% structure + 20% impact
-- style_score = 60% clarity + 40% confidence
+- style_score = clarity
 - overall_score = 60% content_score + 40% style_score
 
 Required JSON shape:
@@ -283,8 +279,7 @@ Required JSON shape:
     "content": number,
     "structure": number,
     "clarity": number,
-    "impact": number,
-    "confidence": number
+    "impact": number
   },
   "content_score": number,
   "style_score": number,
@@ -343,14 +338,12 @@ async function callOpenAIFeedback(key: string, model: string, prompt: string) {
                   structure: { type: "number" },
                   clarity: { type: "number" },
                   impact: { type: "number" },
-                  confidence: { type: "number" },
                 },
                 required: [
                   "content",
                   "structure",
                   "clarity",
                   "impact",
-                  "confidence",
                 ],
               },
               content_score: { type: "number" },
@@ -423,8 +416,7 @@ function parseFeedbackJson(rawText: string, fallback: Feedback): Feedback | null
       typeof rubric.content !== "number" ||
       typeof rubric.structure !== "number" ||
       typeof rubric.clarity !== "number" ||
-      typeof rubric.impact !== "number" ||
-      typeof rubric.confidence !== "number"
+      typeof rubric.impact !== "number"
     ) {
       return null;
     }
@@ -434,16 +426,13 @@ function parseFeedbackJson(rawText: string, fallback: Feedback): Feedback | null
       structure: clampScore(rubric.structure),
       clarity: clampScore(rubric.clarity),
       impact: clampScore(rubric.impact),
-      confidence: clampScore(rubric.confidence),
     };
     const contentScore = clampScore(
       cleanRubric.content * 0.5 +
         cleanRubric.structure * 0.3 +
         cleanRubric.impact * 0.2,
     );
-    const styleScore = clampScore(
-      cleanRubric.clarity * 0.6 + cleanRubric.confidence * 0.4,
-    );
+    const styleScore = cleanRubric.clarity;
     const overallScore = clampScore(contentScore * 0.6 + styleScore * 0.4);
 
     return {
@@ -487,7 +476,8 @@ async function updateSessionFeedback(
     },
   });
 
-  await supabase
+  const completedAt = new Date().toISOString();
+  const { error } = await supabase
     .from("interview_sessions")
     .update({
       ai_feedback: feedback,
@@ -495,7 +485,23 @@ async function updateSessionFeedback(
       style_score: feedback.style_score,
       overall_score: feedback.overall_score,
       status: "completed",
-      completed_at: new Date().toISOString(),
+      completed_at: completedAt,
+    })
+    .eq("id", sessionId);
+
+  if (!error) return;
+
+  console.warn(
+    "Full feedback update failed; retrying with base session columns.",
+    error,
+  );
+
+  await supabase
+    .from("interview_sessions")
+    .update({
+      ai_feedback: feedback,
+      overall_score: feedback.overall_score,
+      status: "completed",
     })
     .eq("id", sessionId);
 }
