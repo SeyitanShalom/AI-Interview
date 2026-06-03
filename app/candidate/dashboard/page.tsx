@@ -11,7 +11,7 @@ import {
   useRef,
 } from "react";
 import { useAuth } from "@/lib/auth";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
@@ -339,7 +339,8 @@ const saveSessionFeedback = async ({
 };
 
 const CandidateDashboardContent = () => {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const kitId = searchParams.get("kit");
   const recorder = useVideoRecorder();
@@ -386,6 +387,15 @@ const CandidateDashboardContent = () => {
     () => normalizeRoles([...splitRoleInput(jobRole), ...profileRoles]),
     [jobRole, profileRoles],
   );
+
+  useEffect(() => {
+    if (authLoading || user) return;
+
+    const redirectPath = `${window.location.pathname}${window.location.search}`;
+    router.replace(
+      `/candidate/auth?redirect=${encodeURIComponent(redirectPath)}`,
+    );
+  }, [authLoading, router, user]);
 
   const normalizeErrorMessage = useCallback((e: unknown) => {
     if (e instanceof Error) return e.message;
@@ -1329,6 +1339,10 @@ const CandidateDashboardContent = () => {
       });
     }
   };
+
+  if (authLoading || !user) {
+    return <DashboardFallback />;
+  }
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-background">

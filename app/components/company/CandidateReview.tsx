@@ -122,10 +122,6 @@ const CandidateReview = ({ sessions, profiles = [] }: CandidateReviewProps) => {
     });
   }, [profiles, searchTerm, sessions, statusFilter]);
 
-  const completedSessions = filteredSessions.filter(
-    (s) => s.status === "completed",
-  );
-
   const sessionCounts = useMemo(
     () => ({
       all: sessions.length,
@@ -146,7 +142,7 @@ const CandidateReview = ({ sessions, profiles = [] }: CandidateReviewProps) => {
     return profile?.full_name || null;
   };
 
-  if (completedSessions.length === 0) {
+  if (filteredSessions.length === 0) {
     return (
       <div className="space-y-6">
         <div>
@@ -219,8 +215,13 @@ const CandidateReview = ({ sessions, profiles = [] }: CandidateReviewProps) => {
       <div>
         <h2 className="text-xl font-bold font-display">Candidate Recordings</h2>
         <p className="text-sm text-muted-foreground">
-          {completedSessions.length} completed interview
-          {completedSessions.length !== 1 ? "s" : ""}
+          {filteredSessions.length}{" "}
+          {statusFilter === "completed"
+            ? "completed interview"
+            : statusFilter === "pending"
+              ? "pending interview"
+              : "candidate interview"}
+          {filteredSessions.length !== 1 ? "s" : ""}
         </p>
       </div>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -269,8 +270,9 @@ const CandidateReview = ({ sessions, profiles = [] }: CandidateReviewProps) => {
       </Dialog>
 
       <div className="space-y-4">
-        {completedSessions.map((session, i) => {
+        {filteredSessions.map((session, i) => {
           const isExpanded = expandedId === session.id;
+          const isCompleted = session.status === "completed";
           const candidateName = getProfileName(session.user_id);
           const feedback = session.ai_feedback;
           const candidateProfile = profileByUserId.get(session.user_id);
@@ -303,6 +305,12 @@ const CandidateReview = ({ sessions, profiles = [] }: CandidateReviewProps) => {
                           >
                             {session.job_role}
                           </Badge>
+                          <Badge
+                            variant={isCompleted ? "secondary" : "outline"}
+                            className="text-[10px] font-normal capitalize"
+                          >
+                            {session.status}
+                          </Badge>
                         </CardTitle>
                         <CardDescription className="flex items-center gap-1 text-xs">
                           <Clock className="w-3 h-3" />
@@ -331,17 +339,19 @@ const CandidateReview = ({ sessions, profiles = [] }: CandidateReviewProps) => {
                           </span>
                         </div>
                       )}
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="w-8 h-8 text-muted-foreground"
-                      >
-                        {isExpanded ? (
-                          <ChevronUp className="w-4 h-4" />
-                        ) : (
-                          <ChevronDown className="w-4 h-4" />
-                        )}
-                      </Button>
+                      {feedback ? (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="w-8 h-8 text-muted-foreground"
+                        >
+                          {isExpanded ? (
+                            <ChevronUp className="w-4 h-4" />
+                          ) : (
+                            <ChevronDown className="w-4 h-4" />
+                          )}
+                        </Button>
+                      ) : null}
                     </div>
                   </div>
                 </CardHeader>
@@ -426,6 +436,11 @@ const CandidateReview = ({ sessions, profiles = [] }: CandidateReviewProps) => {
                         <Target className="w-3 h-3" />{" "}
                         {isExpanded ? "Hide" : "View"} Feedback
                       </Button>
+                    )}
+                    {!isCompleted && (
+                      <span className="text-xs text-muted-foreground">
+                        Waiting for the candidate to submit this interview.
+                      </span>
                     )}
                   </div>
 

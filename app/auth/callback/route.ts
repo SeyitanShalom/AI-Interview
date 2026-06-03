@@ -75,6 +75,9 @@ export async function GET(request: NextRequest) {
       : "/company/auth";
     const errorUrl = new URL(fallbackAuthPath, request.url);
     errorUrl.searchParams.set("error", errorMessage);
+    if (fallbackAuthPath === "/candidate/auth") {
+      errorUrl.searchParams.set("redirect", next);
+    }
     return NextResponse.redirect(errorUrl);
   }
 

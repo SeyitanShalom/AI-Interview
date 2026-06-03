@@ -351,14 +351,20 @@ const CompanyAuth = () => {
         : null;
 
       if (!company) {
-        const { data, error } = await supabase
-          .from("companies")
-          .select("id, name")
-          .eq("invite_code", inviteCode.trim())
-          .single();
+        const response = await fetch(
+          `/api/company/invite-code/${encodeURIComponent(inviteCode.trim())}`,
+        );
+        const payload = (await response.json().catch(() => ({}))) as {
+          companyId?: string;
+          companyName?: string;
+          error?: string;
+        };
 
-        if (!error && data) {
-          company = data;
+        if (response.ok && payload.companyId) {
+          company = {
+            id: payload.companyId,
+            name: payload.companyName ?? "your company",
+          };
         }
       }
 

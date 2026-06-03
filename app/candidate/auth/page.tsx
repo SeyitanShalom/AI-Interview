@@ -166,6 +166,13 @@ const CandidateAuth = () => {
           );
         }
 
+        if (data.session) {
+          const target = safeRedirectPath(redirectTo);
+          setStatus({ type: "success", message: "Account created." });
+          window.location.assign(target);
+          return;
+        }
+
         setStatus({
           type: "success",
           message: "Account created! Check your email to verify your account.",
