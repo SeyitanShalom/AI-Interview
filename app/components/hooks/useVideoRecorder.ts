@@ -116,11 +116,19 @@ export const useVideoRecorder = () => {
         "video/webm;codecs=vp9",
         "video/webm",
       ].find((type) => MediaRecorder.isTypeSupported(type));
+      const recorderOptions: MediaRecorderOptions = mimeType
+        ? { mimeType }
+        : {};
 
-      const recorder = new MediaRecorder(
-        mediaStream,
-        mimeType ? { mimeType } : undefined,
-      );
+      if (mediaStream.getVideoTracks().length > 0) {
+        recorderOptions.videoBitsPerSecond = 900_000;
+      }
+
+      if (mediaStream.getAudioTracks().length > 0) {
+        recorderOptions.audioBitsPerSecond = 96_000;
+      }
+
+      const recorder = new MediaRecorder(mediaStream, recorderOptions);
 
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data);

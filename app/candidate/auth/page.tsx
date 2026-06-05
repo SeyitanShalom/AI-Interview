@@ -314,7 +314,7 @@ const CandidateAuth = () => {
 
           <div className="mt-4 text-center">
             <button
-              onClick={() => router.push("/companies")}
+              onClick={() => router.push("/company/auth")}
               className="text-xs transition-colors text-muted-foreground hover:text-foreground"
             >
               Are you a company? Login here →

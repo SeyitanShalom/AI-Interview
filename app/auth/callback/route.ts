@@ -16,6 +16,10 @@ function safeNextPath(rawNext: string | null): string {
   return rawNext;
 }
 
+function isCandidateAuthDestination(path: string) {
+  return path.startsWith("/candidate") || path.startsWith("/interview/kit/");
+}
+
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
@@ -70,7 +74,7 @@ export async function GET(request: NextRequest) {
   }
 
   if (errorMessage) {
-    const fallbackAuthPath = next.startsWith("/candidate")
+    const fallbackAuthPath = isCandidateAuthDestination(next)
       ? "/candidate/auth"
       : "/company/auth";
     const errorUrl = new URL(fallbackAuthPath, request.url);

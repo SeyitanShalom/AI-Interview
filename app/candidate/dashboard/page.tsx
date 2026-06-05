@@ -39,6 +39,7 @@ import {
   Sparkles,
   FileText,
   ArrowRight,
+  ArrowLeft,
   UserCircle,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -52,7 +53,12 @@ import {
   isMissingProfileRoleColumn,
 } from "@/lib/profileSchema";
 
-type InterviewStep = "setup" | "interview" | "analyzing" | "feedback";
+type InterviewStep =
+  | "setup"
+  | "interview"
+  | "analyzing"
+  | "feedback"
+  | "complete";
 
 interface Feedback {
   rubric_scores?: {
@@ -137,6 +143,15 @@ type LocalTranscriptionPayload = {
   engine?: string;
 };
 
+type InterviewSessionInsertPayload = {
+  user_id: string;
+  job_role: string;
+  question: string;
+  status: string;
+  company_id?: string;
+  interview_kit_id?: string;
+};
+
 const previewResponseText = (value: string) => {
   const compact = value.replace(/\s+/g, " ").trim();
   return compact.length > 180 ? `${compact.slice(0, 180)}...` : compact;
@@ -212,6 +227,96 @@ const getRandomRole = (roles: string[]) =>
   roles.length > 0
     ? roles[Math.floor(Math.random() * roles.length)]
     : "Software Engineer";
+
+const formatInterviewQuestionSet = (questions: string[]) => {
+  const cleanedQuestions = questions
+    .map((question) => question.trim())
+    .filter(Boolean);
+
+  if (cleanedQuestions.length === 1) return cleanedQuestions[0];
+
+  return cleanedQuestions
+    .map((question, index) => `Question ${index + 1}: ${question}`)
+    .join("\n\n");
+};
+
+const isMissingSchemaColumnError = (
+  error: { code?: string; message?: string } | null,
+  columnName: string,
+) => {
+  if (!error) return false;
+
+  const message = error.message?.toLowerCase() ?? "";
+  return (
+    error.code === "PGRST204" ||
+    (message.includes("schema cache") &&
+      message.includes("could not find") &&
+      message.includes(columnName.toLowerCase()))
+  );
+};
+
+const insertInterviewSession = async (
+  sessionPayload: InterviewSessionInsertPayload,
+) => {
+  const insertAndSelect = (payload: InterviewSessionInsertPayload) =>
+    supabase
+      .from("interview_sessions")
+      .insert(payload)
+      .select()
+      .single();
+
+  const modernResult = await insertAndSelect(sessionPayload);
+  if (!modernResult.error) return modernResult;
+
+  if (
+    sessionPayload.interview_kit_id &&
+    isMissingSchemaColumnError(modernResult.error, "interview_kit_id")
+  ) {
+    console.warn(
+      "interview_sessions.interview_kit_id is missing; retrying session insert without the kit id.",
+      modernResult.error,
+    );
+
+    const { interview_kit_id: _interviewKitId, ...withoutKitId } =
+      sessionPayload;
+    const fallbackResult = await insertAndSelect(withoutKitId);
+
+    if (
+      fallbackResult.error &&
+      withoutKitId.company_id &&
+      isMissingSchemaColumnError(fallbackResult.error, "company_id")
+    ) {
+      console.warn(
+        "interview_sessions.company_id is missing; retrying session insert with base columns only.",
+        fallbackResult.error,
+      );
+
+      const { company_id: _companyId, ...basePayload } = withoutKitId;
+      return insertAndSelect(basePayload);
+    }
+
+    return fallbackResult;
+  }
+
+  if (
+    sessionPayload.company_id &&
+    isMissingSchemaColumnError(modernResult.error, "company_id")
+  ) {
+    console.warn(
+      "interview_sessions.company_id is missing; retrying session insert with base columns only.",
+      modernResult.error,
+    );
+
+    const {
+      company_id: _companyId,
+      interview_kit_id: _interviewKitId,
+      ...basePayload
+    } = sessionPayload;
+    return insertAndSelect(basePayload);
+  }
+
+  return modernResult;
+};
 
 const buildFallbackFeedback = (
   jobRole: string,
@@ -338,11 +443,20 @@ const saveSessionFeedback = async ({
     .single();
 };
 
-const CandidateDashboardContent = () => {
+interface CandidateDashboardContentProps {
+  kitIdOverride?: string | null;
+  companyInterviewMode?: boolean;
+}
+
+export const CandidateDashboardContent = ({
+  kitIdOverride = null,
+  companyInterviewMode = false,
+}: CandidateDashboardContentProps = {}) => {
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const kitId = searchParams.get("kit");
+  const queryKitId = searchParams.get("kit");
+  const kitId = kitIdOverride ?? queryKitId;
   const recorder = useVideoRecorder();
 
   const [step, setStep] = useState<InterviewStep>("setup");
@@ -352,6 +466,7 @@ const CandidateDashboardContent = () => {
   const [kitError, setKitError] = useState<string | null>(null);
   const [activeKitQuestionIndex, setActiveKitQuestionIndex] = useState(0);
   const [currentQuestion, setCurrentQuestion] = useState("");
+  const [sessionQuestion, setSessionQuestion] = useState("");
   const [activeQuestionRole, setActiveQuestionRole] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
@@ -386,6 +501,12 @@ const CandidateDashboardContent = () => {
   const practiceRolePool = useMemo(
     () => normalizeRoles([...splitRoleInput(jobRole), ...profileRoles]),
     [jobRole, profileRoles],
+  );
+  const isCompanyKitInterview = Boolean(companyInterviewMode && linkedKit);
+  const hasMoreKitQuestionsAfterFeedback = Boolean(
+    linkedKit &&
+      !isCompanyKitInterview &&
+      activeKitQuestionIndex < linkedKit.questions.length - 1,
   );
 
   useEffect(() => {
@@ -449,6 +570,20 @@ const CandidateDashboardContent = () => {
       normalized.includes("schema cache")
     ) {
       return "Database setup is incomplete: missing table 'interview_sessions'. Run the Supabase migration and try again.";
+    }
+
+    if (
+      normalized.includes("interview_kit_id") &&
+      normalized.includes("schema cache")
+    ) {
+      return "Database setup is missing the 'interview_kit_id' column on interview_sessions. Run the latest Supabase migration, then refresh the schema cache.";
+    }
+
+    if (
+      normalized.includes("company_id") &&
+      normalized.includes("schema cache")
+    ) {
+      return "Database setup is missing the 'company_id' column on interview_sessions. Run the company schema migration, then refresh the schema cache.";
     }
 
     return message;
@@ -780,16 +915,28 @@ const CandidateDashboardContent = () => {
         throw new Error("You are not signed in. Please sign in and try again.");
       }
 
-      let question = "";
+      let sessionQuestionText = "";
+      let displayQuestion = "";
       let questionRole = linkedKit?.job_role || getRandomRole(practiceRolePool);
 
       if (linkedKit) {
-        question =
-          linkedKit.questions[activeKitQuestionIndex]?.trim() ||
-          linkedKit.questions[0]?.trim() ||
-          "";
+        if (companyInterviewMode) {
+          const kitQuestions = linkedKit.questions
+            .map((question) => question.trim())
+            .filter(Boolean);
 
-        if (!question) {
+          sessionQuestionText = formatInterviewQuestionSet(kitQuestions);
+          displayQuestion = kitQuestions[0] || "";
+          setActiveKitQuestionIndex(0);
+        } else {
+          displayQuestion =
+            linkedKit.questions[activeKitQuestionIndex]?.trim() ||
+            linkedKit.questions[0]?.trim() ||
+            "";
+          sessionQuestionText = displayQuestion;
+        }
+
+        if (!sessionQuestionText || !displayQuestion) {
           throw new Error("This interview kit does not have a valid question.");
         }
       } else {
@@ -830,14 +977,15 @@ const CandidateDashboardContent = () => {
 
           if (error) throw error;
 
-          question =
+          sessionQuestionText =
             typeof data?.question === "string" ? data.question.trim() : "";
+          displayQuestion = sessionQuestionText;
           questionRole =
             typeof data?.focusRole === "string" && data.focusRole.trim()
               ? data.focusRole.trim()
               : questionRole;
 
-          if (!question) {
+          if (!sessionQuestionText) {
             throw new Error("No interview question returned from AI provider");
           }
         } catch (e: unknown) {
@@ -849,21 +997,15 @@ const CandidateDashboardContent = () => {
             ? practiceRolePool
             : splitRoleInput(jobRole);
           questionRole = getRandomRole(fallbackRoles);
-          question = getBackupQuestion([questionRole]);
+          sessionQuestionText = getBackupQuestion([questionRole]);
+          displayQuestion = sessionQuestionText;
         }
       }
 
-      const sessionPayload: {
-        user_id: string;
-        job_role: string;
-        question: string;
-        status: string;
-        company_id?: string;
-        interview_kit_id?: string;
-      } = {
+      const sessionPayload: InterviewSessionInsertPayload = {
         user_id: user.id,
         job_role: questionRole,
-        question,
+        question: sessionQuestionText,
         status: "pending",
       };
 
@@ -872,11 +1014,8 @@ const CandidateDashboardContent = () => {
         sessionPayload.interview_kit_id = linkedKit.id;
       }
 
-      const { data: session, error: sessionError } = await supabase
-        .from("interview_sessions")
-        .insert(sessionPayload)
-        .select()
-        .single();
+      const { data: session, error: sessionError } =
+        await insertInterviewSession(sessionPayload);
 
       if (sessionError) {
         const sessionErrorMessage =
@@ -886,7 +1025,8 @@ const CandidateDashboardContent = () => {
         throw new Error(sessionErrorMessage);
       }
 
-      setCurrentQuestion(question);
+      setCurrentQuestion(displayQuestion);
+      setSessionQuestion(sessionQuestionText);
       setActiveQuestionRole(questionRole);
       setCurrentSessionId(session.id);
 
@@ -918,6 +1058,7 @@ const CandidateDashboardContent = () => {
     normalizeErrorMessage,
     toUserFriendlyStartError,
     linkedKit,
+    companyInterviewMode,
     activeKitQuestionIndex,
     resumeSummary,
     resumeRoles,
@@ -1068,6 +1209,7 @@ const CandidateDashboardContent = () => {
 
     try {
       let transcriptForFeedback = "";
+      const feedbackQuestion = sessionQuestion || currentQuestion;
 
       if (recorder.recordedBlob) {
         setIsTranscribing(true);
@@ -1175,7 +1317,7 @@ const CandidateDashboardContent = () => {
             body: {
               sessionId: currentSessionId,
               jobRole: feedbackRole,
-              question: currentQuestion,
+              question: feedbackQuestion,
               transcript: transcriptForFeedback,
               resumeSummary,
               resumeRoles,
@@ -1198,7 +1340,7 @@ const CandidateDashboardContent = () => {
         });
         nextFeedback = buildFallbackFeedback(
           feedbackRole,
-          currentQuestion,
+          feedbackQuestion,
           transcriptForFeedback,
         );
         usedFallbackFeedback = true;
@@ -1234,7 +1376,7 @@ const CandidateDashboardContent = () => {
         ...completedSessionRecord,
         id: currentSessionId,
         job_role: completedSessionRecord.job_role ?? feedbackRole,
-        question: completedSessionRecord.question ?? currentQuestion,
+        question: completedSessionRecord.question ?? feedbackQuestion,
         overall_score: nextFeedback.overall_score,
         content_score: nextFeedback.content_score,
         style_score: nextFeedback.style_score,
@@ -1268,6 +1410,21 @@ const CandidateDashboardContent = () => {
     setAnswerTranscript("");
     manualTranscriptEditedRef.current = false;
     setTranscriptionError(null);
+
+    if (isCompanyKitInterview && linkedKit?.questions[0]) {
+      setActiveKitQuestionIndex(0);
+      setCurrentQuestion(linkedKit.questions[0]);
+    }
+  };
+
+  const handleSelectKitQuestion = (index: number) => {
+    if (!linkedKit) return;
+
+    const question = linkedKit.questions[index]?.trim();
+    if (!question) return;
+
+    setActiveKitQuestionIndex(index);
+    setCurrentQuestion(question);
   };
 
   const resetToSetup = () => {
@@ -1278,12 +1435,16 @@ const CandidateDashboardContent = () => {
     setFeedback(null);
     setCurrentSessionId(null);
     setCurrentQuestion("");
+    setSessionQuestion("");
     setActiveQuestionRole("");
     setSelectedSession(null);
     setAnswerTranscript("");
     manualTranscriptEditedRef.current = false;
     setMediaUnavailableMessage(null);
     setTranscriptionError(null);
+    if (companyInterviewMode) {
+      setActiveKitQuestionIndex(0);
+    }
   };
 
   const handleNextKitQuestion = () => {
@@ -1295,6 +1456,7 @@ const CandidateDashboardContent = () => {
     setFeedback(null);
     setCurrentSessionId(null);
     setCurrentQuestion("");
+    setSessionQuestion("");
     setSelectedSession(null);
     setAnswerTranscript("");
     manualTranscriptEditedRef.current = false;
@@ -1304,6 +1466,24 @@ const CandidateDashboardContent = () => {
       Math.min(index + 1, linkedKit.questions.length - 1),
     );
     setStep("setup");
+  };
+
+  const handleFinishCompanyInterview = () => {
+    stopSpeechRecognition();
+    recorder.stopCamera();
+    recorder.resetRecording();
+    setFeedback(null);
+    setCurrentSessionId(null);
+    setCurrentQuestion("");
+    setSessionQuestion("");
+    setActiveQuestionRole("");
+    setSelectedSession(null);
+    setAnswerTranscript("");
+    manualTranscriptEditedRef.current = false;
+    setMediaUnavailableMessage(null);
+    setTranscriptionError(null);
+    setActiveKitQuestionIndex(0);
+    setStep("complete");
   };
 
   const viewSession = (sessionId: string) => {
@@ -1354,7 +1534,7 @@ const CandidateDashboardContent = () => {
 
       <div className="container relative z-10 max-w-5xl px-6 py-10 mx-auto mt-28">
         {/* Past session feedback view */}
-        {selectedSession && (
+        {!companyInterviewMode && selectedSession && (
           <motion.div
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
@@ -1431,38 +1611,46 @@ const CandidateDashboardContent = () => {
             >
               <div>
                 <h1 className="text-xl font-bold tracking-tight md:text-2xl font-display">
-                  {linkedKit ? linkedKit.title : "Practice Interview"}
+                  {linkedKit
+                    ? linkedKit.title
+                    : companyInterviewMode
+                      ? "Company Interview"
+                      : "Practice Interview"}
                 </h1>
                 <p className="text-xs md:text-sm text-muted-foreground">
                   {linkedKit
-                    ? `${linkedKit.job_role} interview kit`
+                    ? companyInterviewMode
+                      ? `${linkedKit.job_role} company interview`
+                      : `${linkedKit.job_role} interview kit`
                     : "AI-powered mock interviews with real-time feedback"}
                 </p>
               </div>
-              <div className="flex flex-col gap-3 lg:items-end">
-                <div className="flex items-center gap-3">
-                  <Link href="/candidate/profile">
-                    <Button variant="outline" size="sm" className="gap-2">
-                      <UserCircle className="w-4 h-4" />
-                      Profile
-                    </Button>
-                  </Link>
-                  <TabsList className="p-1 border bg-secondary/30 backdrop-blur-sm border-border/30">
-                    <TabsTrigger
-                      value="practice"
-                      className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_0_16px_-4px_hsl(var(--primary)/0.4)] transition-all"
-                    >
-                      <Play className="w-4 h-4" /> Practice
-                    </TabsTrigger>
-                    <TabsTrigger
-                      value="history"
-                      className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_0_16px_-4px_hsl(var(--primary)/0.4)] transition-all"
-                    >
-                      <History className="w-4 h-4" /> History
-                    </TabsTrigger>
-                  </TabsList>
+              {!companyInterviewMode && (
+                <div className="flex flex-col gap-3 lg:items-end">
+                  <div className="flex items-center gap-3">
+                    <Link href="/candidate/profile">
+                      <Button variant="outline" size="sm" className="gap-2">
+                        <UserCircle className="w-4 h-4" />
+                        Profile
+                      </Button>
+                    </Link>
+                    <TabsList className="p-1 border bg-secondary/30 backdrop-blur-sm border-border/30">
+                      <TabsTrigger
+                        value="practice"
+                        className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_0_16px_-4px_hsl(var(--primary)/0.4)] transition-all"
+                      >
+                        <Play className="w-4 h-4" /> Practice
+                      </TabsTrigger>
+                      <TabsTrigger
+                        value="history"
+                        className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_0_16px_-4px_hsl(var(--primary)/0.4)] transition-all"
+                      >
+                        <History className="w-4 h-4" /> History
+                      </TabsTrigger>
+                    </TabsList>
+                  </div>
                 </div>
-              </div>
+              )}
             </motion.div>
 
             <TabsContent value="practice">
@@ -1475,7 +1663,20 @@ const CandidateDashboardContent = () => {
                     exit={{ opacity: 0, y: -20 }}
                   >
                     <div className="grid gap-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:items-start">
-                      {resumeSummary || profileRoles.length > 0 ? (
+                      {companyInterviewMode && linkedKit ? (
+                        <div className="px-4 py-3 text-sm border shadow-sm rounded-2xl border-border/40 bg-secondary/20 text-foreground">
+                          <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                            Company interview
+                          </p>
+                          <p className="text-base font-medium text-foreground">
+                            {linkedKit.job_role}
+                          </p>
+                          <p className="mt-2 text-sm text-muted-foreground">
+                            {linkedKit.questions.length} question
+                            {linkedKit.questions.length !== 1 ? "s" : ""}
+                          </p>
+                        </div>
+                      ) : resumeSummary || profileRoles.length > 0 ? (
                         <div className="px-4 py-3 text-sm border shadow-sm rounded-2xl border-border/40 bg-secondary/20 text-foreground">
                           <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                             Candidate context
@@ -1514,14 +1715,18 @@ const CandidateDashboardContent = () => {
                             <Bot className="w-10 h-10 text-primary" />
                           </div>
                           <CardTitle className="text-xl font-display">
-                            {linkedKit
-                              ? "Start Interview Kit"
-                              : "Start Practice Session"}
+                            {companyInterviewMode
+                              ? "Start Company Interview"
+                              : linkedKit
+                                ? "Start Interview Kit"
+                                : "Start Practice Session"}
                           </CardTitle>
                           <p className="text-sm text-muted-foreground">
-                            {linkedKit
-                              ? "Answer this company question on video and get instant feedback."
-                              : "Our AI interviewer will ask you a question. Record your answer and get instant feedback."}
+                            {companyInterviewMode
+                              ? "Answer the company questions in one video and submit it for review."
+                              : linkedKit
+                                ? "Answer this company question on video and get instant feedback."
+                                : "Our AI interviewer will ask you a question. Record your answer and get instant feedback."}
                           </p>
                         </CardHeader>
                         <CardContent className="space-y-4">
@@ -1547,50 +1752,60 @@ const CandidateDashboardContent = () => {
                                     {linkedKit.title}
                                   </p>
                                   <p className="mt-1 text-xs text-muted-foreground">
-                                    Question {activeKitQuestionIndex + 1} of{" "}
-                                    {linkedKit.questions.length}
+                                    {companyInterviewMode
+                                      ? `${linkedKit.questions.length} question${
+                                          linkedKit.questions.length !== 1
+                                            ? "s"
+                                            : ""
+                                        }`
+                                      : `Question ${
+                                          activeKitQuestionIndex + 1
+                                        } of ${linkedKit.questions.length}`}
                                   </p>
                                 </div>
                               </div>
                             </div>
                           )}
 
-                          <div>
-                            <label className="block mb-2 text-sm font-medium text-foreground">
-                              Practice Role(s)
-                            </label>
-                            <Input
-                              value={jobRole}
-                              onChange={(e) => setJobRole(e.target.value)}
-                              placeholder="e.g. Software Engineer, Product Manager"
-                              disabled={!!linkedKit}
-                              className="bg-secondary/50 border-border/50 focus:border-primary/50 focus:ring-primary/20"
-                            />
-                            {!linkedKit && practiceRolePool.length > 0 && (
-                              <p className="mt-2 text-xs text-muted-foreground">
-                                Randomized across {practiceRolePool.join(", ")}
-                              </p>
-                            )}
-                            {!linkedKit && profileRoles.length > 0 && (
-                              <div className="flex flex-wrap gap-2 mt-3">
-                                {profileRoles.map((role) => (
-                                  <button
-                                    key={role}
-                                    type="button"
-                                    onClick={() => setJobRole(role)}
-                                    className={`px-2 py-1 text-xs border rounded-md transition-colors ${
-                                      jobRole.trim().toLowerCase() ===
-                                      role.toLowerCase()
-                                        ? "border-primary/60 bg-primary/10 text-primary"
-                                        : "border-border/50 bg-secondary/30 text-muted-foreground hover:text-foreground"
-                                    }`}
-                                  >
-                                    {role}
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                          </div>
+                          {!companyInterviewMode && (
+                            <div>
+                              <label className="block mb-2 text-sm font-medium text-foreground">
+                                Practice Role(s)
+                              </label>
+                              <Input
+                                value={jobRole}
+                                onChange={(e) => setJobRole(e.target.value)}
+                                placeholder="e.g. Software Engineer, Product Manager"
+                                disabled={!!linkedKit}
+                                className="bg-secondary/50 border-border/50 focus:border-primary/50 focus:ring-primary/20"
+                              />
+                              {!linkedKit && practiceRolePool.length > 0 && (
+                                <p className="mt-2 text-xs text-muted-foreground">
+                                  Randomized across{" "}
+                                  {practiceRolePool.join(", ")}
+                                </p>
+                              )}
+                              {!linkedKit && profileRoles.length > 0 && (
+                                <div className="flex flex-wrap gap-2 mt-3">
+                                  {profileRoles.map((role) => (
+                                    <button
+                                      key={role}
+                                      type="button"
+                                      onClick={() => setJobRole(role)}
+                                      className={`px-2 py-1 text-xs border rounded-md transition-colors ${
+                                        jobRole.trim().toLowerCase() ===
+                                        role.toLowerCase()
+                                          ? "border-primary/60 bg-primary/10 text-primary"
+                                          : "border-border/50 bg-secondary/30 text-muted-foreground hover:text-foreground"
+                                      }`}
+                                    >
+                                      {role}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
                           <Button
                             onClick={startInterview}
                             disabled={
@@ -1611,7 +1826,9 @@ const CandidateDashboardContent = () => {
                               <>
                                 <Sparkles className="w-4 h-4" />{" "}
                                 {linkedKit
-                                  ? "Start Kit Question"
+                                  ? companyInterviewMode
+                                    ? "Start Interview"
+                                    : "Start Kit Question"
                                   : "Start Interview"}
                               </>
                             )}
@@ -1647,6 +1864,89 @@ const CandidateDashboardContent = () => {
                         !recorder.isRecording && !recorder.recordedUrl
                       }
                     />
+
+                    {isCompanyKitInterview &&
+                      linkedKit &&
+                      linkedKit.questions.length > 1 && (
+                        <div className="max-w-3xl p-4 mx-auto space-y-3 border rounded-xl border-border/50 bg-secondary/20">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <span className="text-sm font-medium text-foreground">
+                              Question {activeKitQuestionIndex + 1} of{" "}
+                              {linkedKit.questions.length}
+                            </span>
+                            <div className="flex gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() =>
+                                  handleSelectKitQuestion(
+                                    activeKitQuestionIndex - 1,
+                                  )
+                                }
+                                disabled={activeKitQuestionIndex === 0}
+                                className="gap-1.5 border-border/50"
+                              >
+                                <ArrowLeft className="w-3.5 h-3.5" />
+                                Previous
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() =>
+                                  handleSelectKitQuestion(
+                                    activeKitQuestionIndex + 1,
+                                  )
+                                }
+                                disabled={
+                                  activeKitQuestionIndex >=
+                                  linkedKit.questions.length - 1
+                                }
+                                className="gap-1.5 border-border/50"
+                              >
+                                Next
+                                <ArrowRight className="w-3.5 h-3.5" />
+                              </Button>
+                            </div>
+                          </div>
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            {linkedKit.questions.map((question, index) => {
+                              const isActive =
+                                index === activeKitQuestionIndex;
+
+                              return (
+                                <button
+                                  key={`${question}-${index}`}
+                                  type="button"
+                                  aria-current={isActive ? "step" : undefined}
+                                  onClick={() =>
+                                    handleSelectKitQuestion(index)
+                                  }
+                                  className={`flex min-h-16 items-start gap-3 rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
+                                    isActive
+                                      ? "border-primary/50 bg-primary/10 text-foreground"
+                                      : "border-border/40 bg-background/50 text-muted-foreground hover:border-primary/30 hover:text-foreground"
+                                  }`}
+                                >
+                                  <span
+                                    className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-xs font-semibold ${
+                                      isActive
+                                        ? "bg-primary text-primary-foreground"
+                                        : "bg-secondary text-muted-foreground"
+                                    }`}
+                                  >
+                                    {index + 1}
+                                  </span>
+                                  <span className="line-clamp-2 leading-5">
+                                    {question}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
 
                     <VideoRecorder
                       stream={recorder.stream}
@@ -1740,7 +2040,10 @@ const CandidateDashboardContent = () => {
                               </>
                             ) : (
                               <>
-                                <Send className="w-4 h-4" /> Submit for Feedback
+                                <Send className="w-4 h-4" />{" "}
+                                {isCompanyKitInterview
+                                  ? "Submit Interview"
+                                  : "Submit for Feedback"}
                               </>
                             )}
                           </Button>
@@ -1786,23 +2089,24 @@ const CandidateDashboardContent = () => {
                       </h2>
                       <Button
                         onClick={
-                          linkedKit &&
-                          activeKitQuestionIndex <
-                            linkedKit.questions.length - 1
+                          hasMoreKitQuestionsAfterFeedback
                             ? handleNextKitQuestion
-                            : resetToSetup
+                            : companyInterviewMode
+                              ? handleFinishCompanyInterview
+                              : resetToSetup
                         }
                         className="gap-2 bg-linear-to-r from-primary to-primary-glow hover:opacity-90"
                       >
-                        {linkedKit &&
-                        activeKitQuestionIndex <
-                          linkedKit.questions.length - 1 ? (
+                        {hasMoreKitQuestionsAfterFeedback ? (
                           <>
                             <ArrowRight className="w-4 h-4" /> Next Question
                           </>
                         ) : (
                           <>
-                            <Play className="w-4 h-4" /> Practice Again
+                            <Play className="w-4 h-4" />{" "}
+                            {companyInterviewMode
+                              ? "Finish Interview"
+                              : "Practice Again"}
                           </>
                         )}
                       </Button>
@@ -1810,16 +2114,49 @@ const CandidateDashboardContent = () => {
                     <FeedbackDisplay feedback={feedback} />
                   </motion.div>
                 )}
+
+                {step === "complete" && companyInterviewMode && (
+                  <motion.div
+                    key="complete"
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="py-20 text-center"
+                  >
+                    <div className="max-w-xl mx-auto">
+                      <div className="w-20 h-20 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-5 shadow-[0_0_30px_-8px_hsl(var(--primary)/0.3)]">
+                        <FileText className="w-10 h-10 text-primary" />
+                      </div>
+                      <h2 className="mb-2 text-2xl font-bold font-display">
+                        Interview Submitted
+                      </h2>
+                      <p className="text-muted-foreground">
+                        Your responses have been saved for the company to
+                        review.
+                      </p>
+                      {linkedKit && (
+                        <Link
+                          href={`/interview/kit/${encodeURIComponent(linkedKit.id)}`}
+                        >
+                          <Button variant="outline" className="mt-6">
+                            View Interview Kit
+                          </Button>
+                        </Link>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
               </AnimatePresence>
             </TabsContent>
 
-            <TabsContent value="history">
-              <SessionHistory
-                sessions={sessions}
-                onSelect={viewSession}
-                onDelete={handleDeleteSession}
-              />
-            </TabsContent>
+            {!companyInterviewMode && (
+              <TabsContent value="history">
+                <SessionHistory
+                  sessions={sessions}
+                  onSelect={viewSession}
+                  onDelete={handleDeleteSession}
+                />
+              </TabsContent>
+            )}
           </Tabs>
         )}
       </div>
@@ -1827,7 +2164,7 @@ const CandidateDashboardContent = () => {
   );
 };
 
-const DashboardFallback = () => (
+export const DashboardFallback = () => (
   <div className="flex items-center justify-center min-h-screen bg-background">
     <div className="relative">
       <div className="w-12 h-12 border-2 rounded-full border-primary/30 border-t-primary animate-spin" />

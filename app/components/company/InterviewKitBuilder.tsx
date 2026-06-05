@@ -74,12 +74,12 @@ const InterviewKitBuilder = ({
   }, [kits, searchTerm]);
 
   const copyInviteLink = (kitId: string) => {
-    const link = `${window.location.origin}/interview/kit/${kitId}`;
+    const link = `${window.location.origin}/interview/kit/${kitId}/take`;
     navigator.clipboard.writeText(link);
     setCopiedKitId(kitId);
     toast({
       title: "Link copied!",
-      description: "Share this link with candidates.",
+      description: "Share this interview link with candidates.",
     });
     setTimeout(() => setCopiedKitId(null), 2000);
   };

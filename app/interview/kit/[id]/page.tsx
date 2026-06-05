@@ -126,10 +126,10 @@ export default async function KitPage({ params }: PageProps) {
 
         <div className="mt-6 flex items-center gap-3">
           <Link
-            href={`/candidate/dashboard?kit=${encodeURIComponent(kit.id)}`}
+            href={`/interview/kit/${encodeURIComponent(kit.id)}/take`}
             className="inline-flex items-center px-4 py-2 rounded-md bg-linear-to-r from-primary to-primary-glow text-primary-foreground"
           >
-            Open in Interview App
+            Take Interview
           </Link>
           <Link
             href="/"
