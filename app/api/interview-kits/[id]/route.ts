@@ -1,17 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { getSharedInterviewKit } from "@/lib/interviewKitAccess";
 
 export const dynamic = "force-dynamic";
-
-interface SharedKit {
-  id: string;
-  title: string;
-  job_role: string;
-  questions: unknown;
-  company_id: string;
-  created_at: string;
-}
 
 function createSupabaseServerClient(
   cookieStore: Awaited<ReturnType<typeof cookies>>,
@@ -37,36 +29,6 @@ function createSupabaseServerClient(
   });
 }
 
-function isMissingRpcError(error: { code?: string; message?: string }) {
-  return (
-    error.code === "PGRST202" ||
-    error.message?.toLowerCase().includes("get_shared_interview_kit")
-  );
-}
-
-function normalizeQuestions(rawQuestions: unknown) {
-  if (Array.isArray(rawQuestions)) {
-    return rawQuestions
-      .map((question) => String(question).trim())
-      .filter(Boolean);
-  }
-
-  if (typeof rawQuestions === "string") {
-    try {
-      const parsed = JSON.parse(rawQuestions) as unknown;
-      if (Array.isArray(parsed)) {
-        return parsed
-          .map((question) => String(question).trim())
-          .filter(Boolean);
-      }
-    } catch {
-      return rawQuestions.trim() ? [rawQuestions.trim()] : [];
-    }
-  }
-
-  return [];
-}
-
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -81,33 +43,35 @@ export async function GET(
 
     const cookieStore = await cookies();
     const supabase = createSupabaseServerClient(cookieStore);
-    const { data: sharedKit, error: sharedKitError } = await supabase
-      .rpc("get_shared_interview_kit", { kit_uuid: kitId })
-      .maybeSingle();
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
 
-    let kit = sharedKit as SharedKit | null;
-
-    if (sharedKitError && isMissingRpcError(sharedKitError)) {
-      const { data: fallbackKit, error: fallbackError } = await supabase
-        .from("interview_kits")
-        .select("id, title, job_role, questions, company_id, created_at")
-        .eq("id", kitId)
-        .maybeSingle();
-
-      if (fallbackError) {
-        return NextResponse.json(
-          { error: fallbackError.message },
-          { status: 500 },
-        );
-      }
-
-      kit = fallbackKit as SharedKit | null;
-    } else if (sharedKitError) {
+    if (userError || !user) {
       return NextResponse.json(
-        { error: sharedKitError.message },
-        { status: 500 },
+        { error: "Sign in as a candidate to access this interview kit." },
+        { status: 401 },
       );
     }
+
+    const isCandidateFromMetadata = user.user_metadata?.role === "candidate";
+    const { data: roles } = await supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", user.id)
+      .eq("role", "candidate")
+      .limit(1);
+    const isCandidateFromTable = Boolean(roles && roles.length > 0);
+
+    if (!isCandidateFromMetadata && !isCandidateFromTable) {
+      return NextResponse.json(
+        { error: "Sign in with a candidate account to access this interview." },
+        { status: 403 },
+      );
+    }
+
+    const kit = await getSharedInterviewKit(supabase, kitId);
 
     if (!kit) {
       return NextResponse.json(
@@ -116,10 +80,7 @@ export async function GET(
       );
     }
 
-    return NextResponse.json({
-      ...kit,
-      questions: normalizeQuestions(kit.questions),
-    });
+    return NextResponse.json(kit);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });

@@ -150,6 +150,7 @@ type InterviewSessionInsertPayload = {
   status: string;
   company_id?: string;
   interview_kit_id?: string;
+  candidate_application_id?: string;
 };
 
 const previewResponseText = (value: string) => {
@@ -167,6 +168,18 @@ const readJsonResponse = async <T,>(response: Response) => {
     return { data: null as T | null, text };
   }
 };
+
+const getRecordingFileExtension = (mimeType: string) => {
+  const normalized = mimeType.split(";")[0]?.trim().toLowerCase();
+
+  if (normalized === "video/mp4" || normalized === "audio/mp4") return "mp4";
+  if (normalized === "audio/mpeg") return "mp3";
+  if (normalized === "audio/wav") return "wav";
+  return "webm";
+};
+
+const getRecordingFileName = (blob: Blob) =>
+  `answer.${getRecordingFileExtension(blob.type)}`;
 
 const getAuthHeaders = async () => {
   const sessionRes = await supabase.auth.getSession();
@@ -249,9 +262,12 @@ const isMissingSchemaColumnError = (
   const message = error.message?.toLowerCase() ?? "";
   return (
     error.code === "PGRST204" ||
+    error.code === "42703" ||
     (message.includes("schema cache") &&
       message.includes("could not find") &&
-      message.includes(columnName.toLowerCase()))
+      message.includes(columnName.toLowerCase())) ||
+    message.includes(`interview_sessions.${columnName.toLowerCase()}`) ||
+    message.includes(`column ${columnName.toLowerCase()} does not exist`)
   );
 };
 
@@ -259,14 +275,36 @@ const insertInterviewSession = async (
   sessionPayload: InterviewSessionInsertPayload,
 ) => {
   const insertAndSelect = (payload: InterviewSessionInsertPayload) =>
-    supabase
-      .from("interview_sessions")
-      .insert(payload)
-      .select()
-      .single();
+    supabase.from("interview_sessions").insert(payload).select().single();
+  const basePayload: InterviewSessionInsertPayload = {
+    user_id: sessionPayload.user_id,
+    job_role: sessionPayload.job_role,
+    question: sessionPayload.question,
+    status: sessionPayload.status,
+  };
+  const withoutKitId: InterviewSessionInsertPayload = {
+    ...basePayload,
+    ...(sessionPayload.company_id
+      ? { company_id: sessionPayload.company_id }
+      : {}),
+  };
 
   const modernResult = await insertAndSelect(sessionPayload);
   if (!modernResult.error) return modernResult;
+
+  if (
+    sessionPayload.candidate_application_id &&
+    isMissingSchemaColumnError(modernResult.error, "candidate_application_id")
+  ) {
+    console.warn(
+      "interview_sessions.candidate_application_id is missing; retrying session insert without the application id.",
+      modernResult.error,
+    );
+
+    const withoutApplicationId = { ...sessionPayload };
+    delete withoutApplicationId.candidate_application_id;
+    return insertInterviewSession(withoutApplicationId);
+  }
 
   if (
     sessionPayload.interview_kit_id &&
@@ -277,8 +315,6 @@ const insertInterviewSession = async (
       modernResult.error,
     );
 
-    const { interview_kit_id: _interviewKitId, ...withoutKitId } =
-      sessionPayload;
     const fallbackResult = await insertAndSelect(withoutKitId);
 
     if (
@@ -291,7 +327,6 @@ const insertInterviewSession = async (
         fallbackResult.error,
       );
 
-      const { company_id: _companyId, ...basePayload } = withoutKitId;
       return insertAndSelect(basePayload);
     }
 
@@ -307,11 +342,6 @@ const insertInterviewSession = async (
       modernResult.error,
     );
 
-    const {
-      company_id: _companyId,
-      interview_kit_id: _interviewKitId,
-      ...basePayload
-    } = sessionPayload;
     return insertAndSelect(basePayload);
   }
 
@@ -352,18 +382,10 @@ const buildFallbackFeedback = (
     };
   }
 
-  const content = clampScore(
-    45 + Math.min(words * 0.28, 35),
-  );
-  const structure = clampScore(
-    42 + Math.min(words * 0.24, 35),
-  );
-  const clarity = clampScore(
-    50 + Math.min(words * 0.18, 30),
-  );
-  const impact = clampScore(
-    38 + Math.min(words * 0.3, 38),
-  );
+  const content = clampScore(45 + Math.min(words * 0.28, 35));
+  const structure = clampScore(42 + Math.min(words * 0.24, 35));
+  const clarity = clampScore(50 + Math.min(words * 0.18, 30));
+  const impact = clampScore(38 + Math.min(words * 0.3, 38));
   const contentScore = clampScore(
     content * 0.5 + structure * 0.3 + impact * 0.2,
   );
@@ -398,11 +420,15 @@ const saveSessionFeedback = async ({
   feedback,
   completedAt,
   videoUrl,
+  companyId,
+  interviewKitId,
 }: {
   sessionId: string;
   feedback: Feedback;
   completedAt: string;
   videoUrl?: string | null;
+  companyId?: string | null;
+  interviewKitId?: string | null;
 }) => {
   const modernPatch = {
     ai_feedback: feedback,
@@ -412,6 +438,8 @@ const saveSessionFeedback = async ({
     status: "completed",
     completed_at: completedAt,
     ...(videoUrl ? { video_url: videoUrl } : {}),
+    ...(companyId ? { company_id: companyId } : {}),
+    ...(interviewKitId ? { interview_kit_id: interviewKitId } : {}),
   };
 
   const modernResult = await supabase
@@ -443,20 +471,51 @@ const saveSessionFeedback = async ({
     .single();
 };
 
-interface CandidateDashboardContentProps {
+const ensureInterviewSessionKitLink = async ({
+  sessionId,
+  companyId,
+  interviewKitId,
+}: {
+  sessionId: string;
+  companyId?: string | null;
+  interviewKitId?: string | null;
+}) => {
+  if (!companyId && !interviewKitId) return;
+
+  const patch = {
+    ...(companyId ? { company_id: companyId } : {}),
+    ...(interviewKitId ? { interview_kit_id: interviewKitId } : {}),
+  };
+
+  const { error } = await supabase
+    .from("interview_sessions")
+    .update(patch)
+    .eq("id", sessionId);
+
+  if (error) {
+    console.warn("Session company/kit link repair failed.", error);
+  }
+};
+
+interface CandidateDashboardViewProps {
   kitIdOverride?: string | null;
+  applicationIdOverride?: string | null;
   companyInterviewMode?: boolean;
 }
 
-export const CandidateDashboardContent = ({
+const CandidateDashboardView = ({
   kitIdOverride = null,
+  applicationIdOverride = null,
   companyInterviewMode = false,
-}: CandidateDashboardContentProps = {}) => {
+}: CandidateDashboardViewProps = {}) => {
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
   const queryKitId = searchParams.get("kit");
+  const queryApplicationId = searchParams.get("application");
   const kitId = kitIdOverride ?? queryKitId;
+  const applicationId =
+    applicationIdOverride ?? queryApplicationId?.trim() ?? null;
   const recorder = useVideoRecorder();
 
   const [step, setStep] = useState<InterviewStep>("setup");
@@ -505,8 +564,8 @@ export const CandidateDashboardContent = ({
   const isCompanyKitInterview = Boolean(companyInterviewMode && linkedKit);
   const hasMoreKitQuestionsAfterFeedback = Boolean(
     linkedKit &&
-      !isCompanyKitInterview &&
-      activeKitQuestionIndex < linkedKit.questions.length - 1,
+    !isCompanyKitInterview &&
+    activeKitQuestionIndex < linkedKit.questions.length - 1,
   );
 
   useEffect(() => {
@@ -607,7 +666,7 @@ export const CandidateDashboardContent = ({
   }, []);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || companyInterviewMode) return;
     const loadSessions = async () => {
       const { data } = await supabase
         .from("interview_sessions")
@@ -618,10 +677,10 @@ export const CandidateDashboardContent = ({
       if (data) setSessions(data as unknown as Session[]);
     };
     loadSessions();
-  }, [user, step]);
+  }, [companyInterviewMode, user, step]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || companyInterviewMode) return;
 
     const loadProfileContext = async () => {
       const selectProfile = (columns: string) =>
@@ -686,7 +745,7 @@ export const CandidateDashboardContent = ({
     };
 
     loadProfileContext();
-  }, [kitId, user, step]);
+  }, [companyInterviewMode, kitId, user, step]);
 
   useEffect(() => {
     let cancelled = false;
@@ -760,6 +819,29 @@ export const CandidateDashboardContent = ({
       cancelled = true;
     };
   }, [kitId]);
+
+  const syncCandidateApplication = useCallback(
+    async (
+      status: "interview_started" | "interview_completed",
+      sessionId: string,
+    ) => {
+      if (!applicationId) return;
+
+      const { error } = await supabase.rpc(
+        "link_candidate_application_session",
+        {
+          application_uuid: applicationId,
+          session_uuid: sessionId,
+          next_status: status,
+        },
+      );
+
+      if (error) {
+        console.warn("Candidate application status sync failed.", error);
+      }
+    },
+    [applicationId],
+  );
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1012,6 +1094,9 @@ export const CandidateDashboardContent = ({
       if (linkedKit) {
         sessionPayload.company_id = linkedKit.company_id;
         sessionPayload.interview_kit_id = linkedKit.id;
+        if (applicationId) {
+          sessionPayload.candidate_application_id = applicationId;
+        }
       }
 
       const { data: session, error: sessionError } =
@@ -1024,6 +1109,16 @@ export const CandidateDashboardContent = ({
             .join(" | ") || "Failed to create interview session";
         throw new Error(sessionErrorMessage);
       }
+
+      if (linkedKit) {
+        await ensureInterviewSessionKitLink({
+          sessionId: session.id,
+          companyId: linkedKit.company_id,
+          interviewKitId: linkedKit.id,
+        });
+      }
+
+      await syncCandidateApplication("interview_started", session.id);
 
       setCurrentQuestion(displayQuestion);
       setSessionQuestion(sessionQuestionText);
@@ -1058,6 +1153,8 @@ export const CandidateDashboardContent = ({
     normalizeErrorMessage,
     toUserFriendlyStartError,
     linkedKit,
+    applicationId,
+    syncCandidateApplication,
     companyInterviewMode,
     activeKitQuestionIndex,
     resumeSummary,
@@ -1116,7 +1213,7 @@ export const CandidateDashboardContent = ({
 
   const transcribeWithLocalWhisper = useCallback(async (blob: Blob) => {
     const formData = new FormData();
-    formData.append("file", blob, "answer.webm");
+    formData.append("file", blob, getRecordingFileName(blob));
     formData.append("language", "en");
 
     const response = await fetch("/api/transcribe-local", {
@@ -1156,39 +1253,36 @@ export const CandidateDashboardContent = ({
     };
   }, []);
 
-  const uploadRecording = useCallback(
-    async (blob: Blob, sessionId: string) => {
-      const formData = new FormData();
-      formData.append("file", blob, "answer.webm");
-      formData.append("sessionId", sessionId);
+  const uploadRecording = useCallback(async (blob: Blob, sessionId: string) => {
+    const formData = new FormData();
+    formData.append("file", blob, getRecordingFileName(blob));
+    formData.append("sessionId", sessionId);
 
-      const response = await fetch("/api/candidate/recording", {
-        method: "POST",
-        headers: await getAuthHeaders(),
-        body: formData,
-      });
-      const { data: payload, text: rawResponse } = await readJsonResponse<{
-        publicUrl?: string;
-        error?: string;
-      }>(response);
+    const response = await fetch("/api/candidate/recording", {
+      method: "POST",
+      headers: await getAuthHeaders(),
+      body: formData,
+    });
+    const { data: payload, text: rawResponse } = await readJsonResponse<{
+      publicUrl?: string;
+      error?: string;
+    }>(response);
 
-      if (!response.ok) {
-        throw new Error(
-          payload?.error ||
-            (rawResponse.trim()
-              ? `Recording upload failed (${response.status}): ${previewResponseText(rawResponse)}`
-              : "Recording upload failed"),
-        );
-      }
+    if (!response.ok) {
+      throw new Error(
+        payload?.error ||
+          (rawResponse.trim()
+            ? `Recording upload failed (${response.status}): ${previewResponseText(rawResponse)}`
+            : "Recording upload failed"),
+      );
+    }
 
-      if (!payload?.publicUrl) {
-        throw new Error("Recording upload did not return a video URL.");
-      }
+    if (!payload?.publicUrl) {
+      throw new Error("Recording upload did not return a video URL.");
+    }
 
-      return payload.publicUrl;
-    },
-    [],
-  );
+    return payload.publicUrl;
+  }, []);
 
   const handleSubmitAnswer = async () => {
     if (!currentSessionId || isSubmittingAnswer) {
@@ -1319,9 +1413,9 @@ export const CandidateDashboardContent = ({
               jobRole: feedbackRole,
               question: feedbackQuestion,
               transcript: transcriptForFeedback,
-              resumeSummary,
-              resumeRoles,
-              targetRoles,
+              resumeSummary: companyInterviewMode ? null : resumeSummary,
+              resumeRoles: companyInterviewMode ? [] : resumeRoles,
+              targetRoles: companyInterviewMode ? [] : targetRoles,
             },
           },
         );
@@ -1364,11 +1458,15 @@ export const CandidateDashboardContent = ({
           feedback: nextFeedback,
           completedAt,
           videoUrl: uploadedVideoUrl,
+          companyId: linkedKit?.company_id ?? null,
+          interviewKitId: linkedKit?.id ?? null,
         });
 
       if (completedSessionError) {
         console.warn("Completed session save failed:", completedSessionError);
       }
+
+      await syncCandidateApplication("interview_completed", currentSessionId);
 
       const completedSessionRecord =
         (completedSession as unknown as Partial<Session> | null) ?? {};
@@ -1390,7 +1488,9 @@ export const CandidateDashboardContent = ({
 
       setSessions((previousSessions) => [
         sessionForHistory,
-        ...previousSessions.filter((session) => session.id !== currentSessionId),
+        ...previousSessions.filter(
+          (session) => session.id !== currentSessionId,
+        ),
       ]);
       setFeedback(nextFeedback);
       setStep("feedback");
@@ -1521,7 +1621,7 @@ export const CandidateDashboardContent = ({
   };
 
   if (authLoading || !user) {
-    return <DashboardFallback />;
+    return <DashboardLoadingFallback />;
   }
 
   return (
@@ -1574,10 +1674,16 @@ export const CandidateDashboardContent = ({
               {selectedSession.video_url && (
                 <div className="overflow-hidden bg-black rounded-2xl aspect-video ring-1 ring-border/30 lg:sticky lg:top-24">
                   <video
-                    src={selectedSession.video_url}
                     controls
                     className="object-cover w-full h-full"
-                  />
+                  >
+                    <source
+                      src={`/api/candidate/recording/${encodeURIComponent(
+                        selectedSession.id,
+                      )}`}
+                    />
+                    <source src={selectedSession.video_url} />
+                  </video>
                 </div>
               )}
               <div className="min-w-0">
@@ -1622,7 +1728,9 @@ export const CandidateDashboardContent = ({
                     ? companyInterviewMode
                       ? `${linkedKit.job_role} company interview`
                       : `${linkedKit.job_role} interview kit`
-                    : "AI-powered mock interviews with real-time feedback"}
+                    : companyInterviewMode
+                      ? "Complete your assigned company interview"
+                      : "AI-powered mock interviews with real-time feedback"}
                 </p>
               </div>
               {!companyInterviewMode && (
@@ -1663,18 +1771,28 @@ export const CandidateDashboardContent = ({
                     exit={{ opacity: 0, y: -20 }}
                   >
                     <div className="grid gap-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:items-start">
-                      {companyInterviewMode && linkedKit ? (
+                      {companyInterviewMode ? (
                         <div className="px-4 py-3 text-sm border shadow-sm rounded-2xl border-border/40 bg-secondary/20 text-foreground">
                           <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                             Company interview
                           </p>
-                          <p className="text-base font-medium text-foreground">
-                            {linkedKit.job_role}
-                          </p>
-                          <p className="mt-2 text-sm text-muted-foreground">
-                            {linkedKit.questions.length} question
-                            {linkedKit.questions.length !== 1 ? "s" : ""}
-                          </p>
+                          {linkedKit ? (
+                            <>
+                              <p className="text-base font-medium text-foreground">
+                                {linkedKit.job_role}
+                              </p>
+                              <p className="mt-2 text-sm text-muted-foreground">
+                                {linkedKit.questions.length} question
+                                {linkedKit.questions.length !== 1 ? "s" : ""}
+                              </p>
+                            </>
+                          ) : (
+                            <p className="text-sm text-muted-foreground">
+                              {kitLoading
+                                ? "Loading your assigned interview..."
+                                : kitError || "Interview details unavailable."}
+                            </p>
+                          )}
                         </div>
                       ) : resumeSummary || profileRoles.length > 0 ? (
                         <div className="px-4 py-3 text-sm border shadow-sm rounded-2xl border-border/40 bg-secondary/20 text-foreground">
@@ -1912,17 +2030,14 @@ export const CandidateDashboardContent = ({
                           </div>
                           <div className="grid gap-2 sm:grid-cols-2">
                             {linkedKit.questions.map((question, index) => {
-                              const isActive =
-                                index === activeKitQuestionIndex;
+                              const isActive = index === activeKitQuestionIndex;
 
                               return (
                                 <button
                                   key={`${question}-${index}`}
                                   type="button"
                                   aria-current={isActive ? "step" : undefined}
-                                  onClick={() =>
-                                    handleSelectKitQuestion(index)
-                                  }
+                                  onClick={() => handleSelectKitQuestion(index)}
                                   className={`flex min-h-16 items-start gap-3 rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
                                     isActive
                                       ? "border-primary/50 bg-primary/10 text-foreground"
@@ -1938,7 +2053,7 @@ export const CandidateDashboardContent = ({
                                   >
                                     {index + 1}
                                   </span>
-                                  <span className="line-clamp-2 leading-5">
+                                  <span className="leading-5 line-clamp-2">
                                     {question}
                                   </span>
                                 </button>
@@ -2164,7 +2279,7 @@ export const CandidateDashboardContent = ({
   );
 };
 
-export const DashboardFallback = () => (
+const DashboardLoadingFallback = () => (
   <div className="flex items-center justify-center min-h-screen bg-background">
     <div className="relative">
       <div className="w-12 h-12 border-2 rounded-full border-primary/30 border-t-primary animate-spin" />
@@ -2173,10 +2288,12 @@ export const DashboardFallback = () => (
   </div>
 );
 
-export default function CandidateDashboard() {
+export default function CandidateDashboard(
+  props: CandidateDashboardViewProps = {},
+) {
   return (
-    <Suspense fallback={<DashboardFallback />}>
-      <CandidateDashboardContent />
+    <Suspense fallback={<DashboardLoadingFallback />}>
+      <CandidateDashboardView {...props} />
     </Suspense>
   );
 }

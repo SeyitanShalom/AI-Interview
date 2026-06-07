@@ -13,13 +13,25 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/app/components/ui/tabs";
-import { Building2, KeyRound, FileText, Video, BarChart3 } from "lucide-react";
+import {
+  AlertTriangle,
+  Building2,
+  KeyRound,
+  FileText,
+  UsersRound,
+  Video,
+  BarChart3,
+} from "lucide-react";
 import { motion } from "framer-motion";
 import InviteCodeManager from "@/app/components/company/InviteCodeManager";
 import InterviewKitBuilder from "@/app/components/company/InterviewKitBuilder";
+import ApplicantsManager from "@/app/components/company/ApplicantsManager";
 import CandidateReview from "@/app/components/company/CandidateReview";
 import AnalyticsCharts from "@/app/components/company/AnalyticsCharts";
-import { isMissingProfileResumeColumn } from "@/lib/profileSchema";
+import {
+  isMissingProfileNameColumn,
+  isMissingProfileResumeColumn,
+} from "@/lib/profileSchema";
 
 const getReadableError = (error: unknown) => {
   if (!error) return null;
@@ -100,6 +112,9 @@ const CompanyDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [initialLoad, setInitialLoad] = useState(true);
   const [accessIssue, setAccessIssue] = useState<string | null>(null);
+  const [sessionSchemaIssue, setSessionSchemaIssue] = useState<string | null>(
+    null,
+  );
 
   const fetchData = useCallback(async () => {
     if (authLoading) {
@@ -113,6 +128,7 @@ const CompanyDashboard = () => {
       setSessions([]);
       setCandidateProfiles([]);
       setAccessIssue(null);
+      setSessionSchemaIssue(null);
       setUserRole(null);
       setLoading(false);
       return;
@@ -122,6 +138,7 @@ const CompanyDashboard = () => {
 
     try {
       setAccessIssue(null);
+      setSessionSchemaIssue(null);
 
       const { data: memberRows, error: memberError } = await supabase
         .from("company_members")
@@ -275,10 +292,11 @@ const CompanyDashboard = () => {
 
       if (!companyId) {
         setCompany(null);
+        setSessionSchemaIssue(null);
         return;
       }
 
-      const [companyRes, membersRes, kitsRes, sessionsRes] = await Promise.all([
+      const [companyRes, membersRes, kitsRes] = await Promise.all([
         supabase
           .from("companies")
           .select("id, name, invite_code")
@@ -290,11 +308,6 @@ const CompanyDashboard = () => {
           .eq("company_id", companyId),
         supabase
           .from("interview_kits")
-          .select("*")
-          .eq("company_id", companyId)
-          .order("created_at", { ascending: false }),
-        supabase
-          .from("interview_sessions")
           .select("*")
           .eq("company_id", companyId)
           .order("created_at", { ascending: false }),
@@ -335,10 +348,6 @@ const CompanyDashboard = () => {
         throw new Error(`interview kits load failed: ${kitsRes.error.message}`);
       }
 
-      if (sessionsRes.error) {
-        throw new Error(`sessions load failed: ${sessionsRes.error.message}`);
-      }
-
       if (membersRes.data) setMembers(membersRes.data as CompanyMember[]);
       if (membersRes.data) {
         const me = (membersRes.data as CompanyMember[]).find(
@@ -346,55 +355,93 @@ const CompanyDashboard = () => {
         );
         if (me) setUserRole(me.role ?? null);
       }
-      if (kitsRes.data) setKits(kitsRes.data as InterviewKit[]);
-      if (sessionsRes.data) {
-        const companySessions = sessionsRes.data as CompanySession[];
-        setSessions(companySessions);
-        // Fetch candidate profiles for completed sessions
-        const userIds = [
-          ...new Set(
-            companySessions
-              .filter((s) => s.status === "completed")
-              .map((s) => s.user_id),
-          ),
-        ];
-        if (userIds.length > 0) {
-          let { data: profilesData, error: profilesError } = await supabase
+      const companyKits = (kitsRes.data ?? []) as InterviewKit[];
+      if (kitsRes.data) setKits(companyKits);
+
+      const sessionsResponse = await fetch(
+        `/api/company/sessions?companyId=${encodeURIComponent(companyId)}`,
+      );
+      const sessionsPayload = (await sessionsResponse
+        .json()
+        .catch(() => ({}))) as {
+        sessions?: CompanySession[];
+        schemaIssue?: string | null;
+        error?: string;
+      };
+
+      if (!sessionsResponse.ok) {
+        throw new Error(
+          sessionsPayload.error || "Company sessions could not be loaded.",
+        );
+      }
+
+      const companySessions = sessionsPayload.sessions ?? [];
+      setSessions(companySessions);
+      setSessionSchemaIssue(sessionsPayload.schemaIssue ?? null);
+
+      // Fetch candidate profiles for completed sessions
+      const userIds = [
+        ...new Set(
+          companySessions
+            .filter((s) => s.status === "completed")
+            .map((s) => s.user_id),
+        ),
+      ];
+
+      if (userIds.length > 0) {
+        let { data: profilesData, error: profilesError } = await supabase
+          .from("profiles")
+          .select("user_id, full_name, resume_summary")
+          .in("user_id", userIds);
+
+        if (profilesError) {
+          const isMissingName = isMissingProfileNameColumn(profilesError);
+          const isMissingResume = isMissingProfileResumeColumn(profilesError);
+
+          if (!isMissingName && !isMissingResume) {
+            throw new Error(
+              `candidate profiles load failed: ${profilesError.message}`,
+            );
+          }
+
+          const fallbackColumns = [
+            "user_id",
+            !isMissingName ? "full_name" : null,
+            !isMissingResume ? "resume_summary" : null,
+          ]
+            .filter(Boolean)
+            .join(", ");
+
+          const fallback = await supabase
             .from("profiles")
-            .select("user_id, full_name, resume_summary")
+            .select(fallbackColumns)
             .in("user_id", userIds);
 
+          profilesData = fallback.data?.map(
+            (profile: {
+              user_id: string;
+              full_name?: string | null;
+              resume_summary?: string | null;
+            }) => ({
+              user_id: profile.user_id,
+              full_name: profile.full_name ?? "",
+              resume_summary: profile.resume_summary ?? null,
+            }),
+          );
+          profilesError = fallback.error;
+
           if (profilesError) {
-            if (!isMissingProfileResumeColumn(profilesError)) {
-              throw new Error(
-                `candidate profiles load failed: ${profilesError.message}`,
-              );
-            }
-
-            const fallback = await supabase
-              .from("profiles")
-              .select("user_id, full_name")
-              .in("user_id", userIds);
-
-            profilesData = fallback.data?.map(
-              (profile: { user_id: string; full_name: string }) => ({
-                ...profile,
-                resume_summary: null,
-              }),
+            throw new Error(
+              `candidate profiles load failed: ${profilesError.message}`,
             );
-            profilesError = fallback.error;
-
-            if (profilesError) {
-              throw new Error(
-                `candidate profiles load failed: ${profilesError.message}`,
-              );
-            }
-          }
-
-          if (profilesData) {
-            setCandidateProfiles(profilesData as CandidateProfileSummary[]);
           }
         }
+
+        if (profilesData) {
+          setCandidateProfiles(profilesData as CandidateProfileSummary[]);
+        }
+      } else {
+        setCandidateProfiles([]);
       }
     } catch (error) {
       setCompany(null);
@@ -403,6 +450,7 @@ const CompanyDashboard = () => {
       setSessions([]);
       setCandidateProfiles([]);
       setAccessIssue(getReadableError(error));
+      setSessionSchemaIssue(null);
       setUserRole(null);
     } finally {
       setLoading(false);
@@ -478,13 +526,21 @@ const CompanyDashboard = () => {
             Manage your team, interview kits, and candidate reviews.
           </p>
           {company && (
-            <div className="flex items-center gap-3 mb-8">
-              <span className="text-sm text-muted-foreground">
-                {company.name}
-              </span>
-              <span className="px-2 py-1 text-xs rounded-full bg-secondary text-secondary-foreground">
-                Role: {userRole ?? "—"}
-              </span>
+            <div className="mb-8 space-y-3">
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-muted-foreground">
+                  {company.name}
+                </span>
+                <span className="px-2 py-1 text-xs rounded-full bg-secondary text-secondary-foreground">
+                  Role: {userRole ?? "—"}
+                </span>
+              </div>
+              {sessionSchemaIssue && (
+                <div className="flex max-w-3xl items-start gap-2 rounded-md border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-sm text-yellow-800 dark:text-yellow-200">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>{sessionSchemaIssue}</span>
+                </div>
+              )}
             </div>
           )}
         </motion.div>
@@ -520,35 +576,48 @@ const CompanyDashboard = () => {
             </div>
           </motion.div>
         ) : (
-          <Tabs defaultValue="team" className="space-y-6 ">
-            <TabsList className="border bg-secondary/10 dark:bg-secondary/30 backdrop-blur-sm border-border/30">
+          <Tabs defaultValue="team" className="gap-5 sm:gap-6">
+            <TabsList className="grid h-auto min-h-fit w-full max-w-full grid-cols-2 gap-1 rounded-lg border bg-secondary/10 p-1 dark:bg-secondary/30 backdrop-blur-sm border-border/30 group-data-horizontal/tabs:h-auto sm:flex sm:flex-wrap sm:justify-start">
               <TabsTrigger
                 value="team"
-                className="gap-1 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_0_16px_-4px_hsl(var(--primary)/0.4)] transition-all"
+                className="h-9 min-w-0 flex-none justify-start gap-1 px-2 text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_0_16px_-4px_hsl(var(--primary)/0.4)] transition-all sm:h-8 sm:justify-center sm:text-sm"
               >
-                <KeyRound className="w-4 h-4" /> Team & Invite
+                <KeyRound className="w-4 h-4" />
+                <span className="sm:hidden">Team</span>
+                <span className="hidden sm:inline">Team & Invite</span>
               </TabsTrigger>
               <TabsTrigger
                 value="kits"
-                className="gap-1 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_0_16px_-4px_hsl(var(--primary)/0.4)] transition-all"
+                className="h-9 min-w-0 flex-none justify-start gap-1 px-2 text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_0_16px_-4px_hsl(var(--primary)/0.4)] transition-all sm:h-8 sm:justify-center sm:text-sm"
               >
-                <FileText className="w-4 h-4" /> Interview Kits
+                <FileText className="w-4 h-4" />
+                <span className="sm:hidden">Kits</span>
+                <span className="hidden sm:inline">Interview Kits</span>
+              </TabsTrigger>
+              <TabsTrigger
+                value="applicants"
+                className="h-9 min-w-0 flex-none justify-start gap-1 px-2 text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_0_16px_-4px_hsl(var(--primary)/0.4)] transition-all sm:h-8 sm:justify-center sm:text-sm"
+              >
+                <UsersRound className="w-4 h-4" /> Applicants
               </TabsTrigger>
               <TabsTrigger
                 value="review"
-                className="gap-1 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_0_16px_-4px_hsl(var(--primary)/0.4)] transition-all"
+                className="h-9 min-w-0 flex-none justify-start gap-1 px-2 text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_0_16px_-4px_hsl(var(--primary)/0.4)] transition-all sm:h-8 sm:justify-center sm:text-sm"
               >
-                <Video className="w-4 h-4" /> Candidate Review
+                <Video className="w-4 h-4" />
+                <span className="sm:hidden">Reviews</span>
+                <span className="hidden sm:inline">Candidate Review</span>
               </TabsTrigger>
               <TabsTrigger
                 value="analytics"
-                className="gap-1 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_0_16px_-4px_hsl(var(--primary)/0.4)] transition-all"
+                className="col-span-2 h-9 min-w-0 flex-none justify-start gap-1 px-2 text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_0_16px_-4px_hsl(var(--primary)/0.4)] transition-all sm:col-span-1 sm:h-8 sm:justify-center sm:text-sm"
               >
                 <BarChart3 className="w-4 h-4" /> Analytics
               </TabsTrigger>
             </TabsList>
 
             <motion.div
+              className="pt-1 sm:pt-0"
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.1 }}
@@ -587,6 +656,22 @@ const CompanyDashboard = () => {
                 )}
               </TabsContent>
 
+              <TabsContent value="applicants">
+                {loading ? (
+                  <div className="space-y-3">
+                    <div className="h-28 rounded-xl bg-secondary/20 animate-pulse" />
+                    <div className="h-28 rounded-xl bg-secondary/20 animate-pulse" />
+                    <div className="h-28 rounded-xl bg-secondary/20 animate-pulse" />
+                  </div>
+                ) : (
+                  <ApplicantsManager
+                    companyId={company.id}
+                    kits={kits}
+                    currentUserRole={userRole}
+                  />
+                )}
+              </TabsContent>
+
               <TabsContent value="review">
                 {loading ? (
                   <div className="space-y-3">
@@ -599,6 +684,8 @@ const CompanyDashboard = () => {
                     sessions={sessions}
                     profiles={candidateProfiles}
                     currentUserRole={userRole}
+                    companyId={company.id}
+                    onRefresh={fetchData}
                   />
                 )}
               </TabsContent>

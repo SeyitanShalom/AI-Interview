@@ -30,6 +30,28 @@ function getMediaAccessErrorMessage(error: unknown) {
   return "Camera and microphone access failed.";
 }
 
+function getPlayableRecordingMimeType() {
+  const candidates = [
+    'video/mp4;codecs="avc1.42E01E,mp4a.40.2"',
+    "video/mp4",
+    'video/webm;codecs="vp8,opus"',
+    'video/webm;codecs="vp9,opus"',
+    "video/webm",
+  ];
+  const playbackProbe =
+    typeof document !== "undefined" ? document.createElement("video") : null;
+
+  return candidates.find((type) => {
+    if (!MediaRecorder.isTypeSupported(type)) return false;
+    if (!playbackProbe) return true;
+
+    const baseType = type.split(";")[0];
+    return Boolean(
+      playbackProbe.canPlayType(type) || playbackProbe.canPlayType(baseType),
+    );
+  });
+}
+
 export const useVideoRecorder = () => {
   const [isRecording, setIsRecording] = useState(false);
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
@@ -112,10 +134,7 @@ export const useVideoRecorder = () => {
       setDuration(0);
       setError(null);
 
-      const mimeType = [
-        "video/webm;codecs=vp9",
-        "video/webm",
-      ].find((type) => MediaRecorder.isTypeSupported(type));
+      const mimeType = getPlayableRecordingMimeType();
       const recorderOptions: MediaRecorderOptions = mimeType
         ? { mimeType }
         : {};
@@ -139,8 +158,10 @@ export const useVideoRecorder = () => {
         if (timerRef.current) clearInterval(timerRef.current);
       };
       recorder.onstop = () => {
+        const blobType =
+          recorder.mimeType || mimeType || chunksRef.current[0]?.type || "";
         const blob = new Blob(chunksRef.current, {
-          type: recorder.mimeType || "video/webm",
+          type: blobType,
         });
         setRecordedBlob(blob);
         setRecordedUrl(URL.createObjectURL(blob));

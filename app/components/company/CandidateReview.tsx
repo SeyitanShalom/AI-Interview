@@ -21,6 +21,8 @@ import {
   Target,
   TrendingUp,
   AlertTriangle,
+  Trash2,
+  Loader2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -29,6 +31,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/app/components/ui/dialog";
+import { useToast } from "@/app/components/hooks/useToast";
 
 interface Feedback {
   content_score: number;
@@ -69,6 +72,8 @@ interface CandidateReviewProps {
   sessions: Session[];
   profiles?: CandidateProfile[];
   currentUserRole?: string | null;
+  companyId?: string;
+  onRefresh?: () => void;
 }
 
 type SessionStatusFilter = "all" | "completed" | "pending";
@@ -85,12 +90,95 @@ const scoreBg = (score: number) => {
   return "bg-destructive/10 border-destructive/20";
 };
 
-const CandidateReview = ({ sessions, profiles = [] }: CandidateReviewProps) => {
+const CandidateReview = ({
+  sessions,
+  profiles = [],
+  currentUserRole,
+  companyId,
+  onRefresh,
+}: CandidateReviewProps) => {
+  const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] =
     useState<SessionStatusFilter>("completed");
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [videoDialogUrl, setVideoDialogUrl] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [videoDialogSession, setVideoDialogSession] = useState<{
+    id: string;
+    url: string;
+  } | null>(null);
+  const canDeleteReviews = currentUserRole === "admin";
+
+  const handleDeleteReview = async (session: Session) => {
+    if (!canDeleteReviews) {
+      toast({
+        title: "Access denied",
+        description: "Only admins can delete candidate reviews.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!companyId) {
+      toast({
+        title: "Missing company",
+        description: "Refresh the dashboard and try again.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Delete this candidate review? This removes the score, feedback, and recording from the company dashboard.",
+    );
+
+    if (!confirmed) return;
+
+    setDeletingId(session.id);
+
+    try {
+      const response = await fetch(
+        `/api/company/sessions/${encodeURIComponent(session.id)}`,
+        {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ companyId }),
+        },
+      );
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Failed to delete candidate review.");
+      }
+
+      if (expandedId === session.id) {
+        setExpandedId(null);
+      }
+
+      if (videoDialogSession?.id === session.id) {
+        setVideoDialogSession(null);
+      }
+
+      toast({
+        title: "Review deleted",
+        description: "The candidate review was removed.",
+      });
+      onRefresh?.();
+    } catch (error) {
+      toast({
+        title: "Delete failed",
+        description:
+          error instanceof Error
+            ? error.message
+            : "Failed to delete candidate review.",
+        variant: "destructive",
+      });
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   const filteredSessions = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -249,8 +337,8 @@ const CandidateReview = ({ sessions, profiles = [] }: CandidateReviewProps) => {
       </div>
       {/* Video Dialog */}
       <Dialog
-        open={!!videoDialogUrl}
-        onOpenChange={() => setVideoDialogUrl(null)}
+        open={!!videoDialogSession}
+        onOpenChange={() => setVideoDialogSession(null)}
       >
         <DialogContent className="max-w-3xl bg-card border-border/50">
           <DialogHeader>
@@ -258,13 +346,19 @@ const CandidateReview = ({ sessions, profiles = [] }: CandidateReviewProps) => {
               Candidate Recording
             </DialogTitle>
           </DialogHeader>
-          {videoDialogUrl && (
+          {videoDialogSession && (
             <video
-              src={videoDialogUrl}
               controls
               autoPlay
               className="w-full bg-black rounded-lg aspect-video"
-            />
+            >
+              <source
+                src={`/api/candidate/recording/${encodeURIComponent(
+                  videoDialogSession.id,
+                )}`}
+              />
+              <source src={videoDialogSession.url} />
+            </video>
           )}
         </DialogContent>
       </Dialog>
@@ -277,6 +371,7 @@ const CandidateReview = ({ sessions, profiles = [] }: CandidateReviewProps) => {
           const feedback = session.ai_feedback;
           const candidateProfile = profileByUserId.get(session.user_id);
           const resumeSummary = candidateProfile?.resume_summary?.trim();
+          const recordingUrl = session.video_url;
 
           return (
             <motion.div
@@ -410,14 +505,17 @@ const CandidateReview = ({ sessions, profiles = [] }: CandidateReviewProps) => {
                     )}
 
                   <div className="flex items-center gap-2 pt-2 border-t border-border/20">
-                    {session.video_url && (
+                    {recordingUrl && (
                       <Button
                         variant="outline"
                         size="sm"
                         className="text-xs gap-1.5 border-primary/20 text-primary hover:bg-primary/10"
                         onClick={(e) => {
                           e.stopPropagation();
-                          setVideoDialogUrl(session.video_url);
+                          setVideoDialogSession({
+                            id: session.id,
+                            url: recordingUrl,
+                          });
                         }}
                       >
                         <Play className="w-3 h-3" /> Watch Recording
@@ -435,6 +533,25 @@ const CandidateReview = ({ sessions, profiles = [] }: CandidateReviewProps) => {
                       >
                         <Target className="w-3 h-3" />{" "}
                         {isExpanded ? "Hide" : "View"} Feedback
+                      </Button>
+                    )}
+                    {canDeleteReviews && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={deletingId === session.id}
+                        className="text-xs gap-1.5 border-destructive/30 text-destructive hover:bg-destructive/10"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteReview(session);
+                        }}
+                      >
+                        {deletingId === session.id ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <Trash2 className="w-3 h-3" />
+                        )}
+                        Delete
                       </Button>
                     )}
                     {!isCompleted && (

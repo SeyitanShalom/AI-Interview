@@ -4,6 +4,8 @@ export const PROFILE_RESUME_COLUMNS = [
   "resume_summary",
 ] as const;
 
+export const PROFILE_NAME_COLUMNS = ["full_name"] as const;
+
 export const PROFILE_ROLE_COLUMNS = ["resume_roles", "target_roles"] as const;
 
 export const PROFILE_EXTENDED_COLUMNS = [
@@ -78,6 +80,9 @@ export const getMissingProfileColumns = (
 
 export const isMissingProfileResumeColumn = (error: unknown) =>
   isMissingProfileColumn(error, PROFILE_RESUME_COLUMNS);
+
+export const isMissingProfileNameColumn = (error: unknown) =>
+  isMissingProfileColumn(error, PROFILE_NAME_COLUMNS);
 
 export const isMissingProfileRoleColumn = (error: unknown) =>
   isMissingProfileColumn(error, PROFILE_ROLE_COLUMNS);

@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { getErrorMessage } from "@/lib/profileSchema";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const RECORDINGS_BUCKET = "interview-recordings";
-const MAX_RECORDING_BYTES = 80 * 1024 * 1024;
+const MAX_RECORDING_BYTES = 200 * 1024 * 1024;
 const ALLOWED_RECORDING_MIME_TYPES = new Set([
   "video/webm",
   "video/mp4",
@@ -17,34 +17,6 @@ const ALLOWED_RECORDING_MIME_TYPES = new Set([
   "audio/mpeg",
   "audio/wav",
 ]);
-
-type StorageAdmin = {
-  storage: {
-    getBucket: (bucketId: string) => Promise<{ error: unknown | null }>;
-    updateBucket: (
-      bucketId: string,
-      options: { public: boolean },
-    ) => Promise<{ error: unknown | null }>;
-    createBucket: (
-      bucketId: string,
-      options: { public: boolean },
-    ) => Promise<{ error: unknown | null }>;
-    from: (bucketId: string) => {
-      upload: (
-        path: string,
-        body: Buffer,
-        options: {
-          contentType: string;
-          upsert: boolean;
-          cacheControl: string;
-        },
-      ) => Promise<{ error: unknown | null }>;
-      getPublicUrl: (path: string) => {
-        data: { publicUrl: string };
-      };
-    };
-  };
-};
 
 function isMissingStorageBucket(error: unknown) {
   const message = getErrorMessage(error).toLowerCase();
@@ -55,7 +27,7 @@ function isMissingStorageBucket(error: unknown) {
   );
 }
 
-async function ensureRecordingBucket(admin: StorageAdmin) {
+async function ensureRecordingBucket(admin: SupabaseClient) {
   const { error: bucketError } = await admin.storage.getBucket(
     RECORDINGS_BUCKET,
   );
@@ -86,13 +58,18 @@ async function ensureRecordingBucket(admin: StorageAdmin) {
   }
 }
 
-async function getOwnerId(request: Request) {
+async function getOwnerClient(request: Request) {
   const cookieStore = await cookies();
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   if (!supabaseUrl || !supabaseKey) {
-    return { ownerId: null, error: "Missing Supabase config", status: 500 };
+    return {
+      ownerId: null,
+      client: null,
+      error: "Missing Supabase config",
+      status: 500,
+    };
   }
 
   const supabase = createServerClient(supabaseUrl, supabaseKey, {
@@ -110,14 +87,19 @@ async function getOwnerId(request: Request) {
 
   const { data: userData, error: userErr } = await supabase.auth.getUser();
   if (!userErr && userData?.user) {
-    return { ownerId: userData.user.id, error: null, status: 200 };
+    return {
+      ownerId: userData.user.id,
+      client: supabase,
+      error: null,
+      status: 200,
+    };
   }
 
   const authHeader =
     request.headers.get("authorization") ||
     request.headers.get("Authorization");
   if (!authHeader?.startsWith("Bearer ")) {
-    return { ownerId: null, error: "Unauthorized", status: 401 };
+    return { ownerId: null, client: null, error: "Unauthorized", status: 401 };
   }
 
   const token = authHeader.split(" ")[1];
@@ -125,30 +107,57 @@ async function getOwnerId(request: Request) {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!userResp.ok) {
-    return { ownerId: null, error: "Invalid token", status: 401 };
+    return { ownerId: null, client: null, error: "Invalid token", status: 401 };
   }
 
   const userJson = (await userResp.json()) as { id?: string | null };
-  return { ownerId: userJson?.id ?? null, error: null, status: 200 };
+  return {
+    ownerId: userJson?.id ?? null,
+    client: createClient(supabaseUrl, supabaseKey, {
+      auth: { persistSession: false },
+      global: {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    }),
+    error: null,
+    status: 200,
+  };
 }
 
 function getRecordingMimeType(file: File) {
-  return file.type.split(";")[0]?.trim().toLowerCase() || "video/webm";
+  const browserMime = file.type.split(";")[0]?.trim().toLowerCase();
+  if (browserMime) return browserMime;
+
+  const extension = file.name.split(".").pop()?.toLowerCase();
+  if (extension === "mp4" || extension === "m4a") return "video/mp4";
+  if (extension === "mp3") return "audio/mpeg";
+  if (extension === "wav") return "audio/wav";
+  return "video/webm";
+}
+
+function getRecordingExtension(mimeType: string) {
+  if (mimeType === "video/mp4" || mimeType === "audio/mp4") return "mp4";
+  if (mimeType === "audio/mpeg") return "mp3";
+  if (mimeType === "audio/wav") return "wav";
+  return "webm";
 }
 
 export async function POST(request: Request) {
   try {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-    if (!supabaseUrl || !serviceRole) {
+    if (!supabaseUrl || !supabaseKey) {
       return NextResponse.json(
-        { error: "Missing Supabase recording upload config" },
+        { error: "Missing Supabase config" },
         { status: 500 },
       );
     }
 
-    const ownerResult = await getOwnerId(request);
+    const ownerResult = await getOwnerClient(request);
     if (!ownerResult.ownerId) {
       return NextResponse.json(
         { error: ownerResult.error || "Unauthorized" },
@@ -176,7 +185,7 @@ export async function POST(request: Request) {
 
     if (file.size > MAX_RECORDING_BYTES) {
       return NextResponse.json(
-        { error: "Recording is too large. Keep videos under 80 MB." },
+        { error: "Recording is too large. Keep videos under 200 MB." },
         { status: 413 },
       );
     }
@@ -189,15 +198,30 @@ export async function POST(request: Request) {
       );
     }
 
-    const admin = createClient(supabaseUrl, serviceRole, {
-      auth: { persistSession: false },
-    });
-    const filePath = `${ownerResult.ownerId}/${sessionId}.webm`;
+    const admin = serviceRole
+      ? createClient(supabaseUrl, serviceRole, {
+          auth: { persistSession: false },
+        })
+      : null;
+    const uploadClient = admin ?? ownerResult.client;
+
+    if (!uploadClient) {
+      return NextResponse.json(
+        { error: "Unauthorized" },
+        { status: 401 },
+      );
+    }
+
+    const filePath = `${ownerResult.ownerId}/${sessionId}.${getRecordingExtension(
+      mimeType,
+    )}`;
     const buffer = Buffer.from(await file.arrayBuffer());
 
-    await ensureRecordingBucket(admin);
+    if (admin) {
+      await ensureRecordingBucket(admin);
+    }
 
-    const { error: uploadError } = await admin.storage
+    const { error: uploadError } = await uploadClient.storage
       .from(RECORDINGS_BUCKET)
       .upload(filePath, buffer, {
         contentType: mimeType,
@@ -206,18 +230,28 @@ export async function POST(request: Request) {
       });
 
     if (uploadError) {
+      if (!admin && isMissingStorageBucket(uploadError)) {
+        return NextResponse.json(
+          {
+            error:
+              "Recording storage bucket is missing. Run the Supabase recording migration or configure SUPABASE_SERVICE_ROLE_KEY so the app can create it.",
+          },
+          { status: 500 },
+        );
+      }
+
       return NextResponse.json(
         { error: getErrorMessage(uploadError) || "Recording upload failed" },
         { status: 500 },
       );
     }
 
-    const { data: urlData } = admin.storage
+    const { data: urlData } = uploadClient.storage
       .from(RECORDINGS_BUCKET)
       .getPublicUrl(filePath);
 
     const publicUrl = urlData.publicUrl;
-    const { error: updateError } = await admin
+    const { error: updateError } = await uploadClient
       .from("interview_sessions")
       .update({ video_url: publicUrl })
       .eq("id", sessionId)
