@@ -335,7 +335,7 @@ begin
     raise exception 'This application link is not available.';
   end if;
 
-  insert into public.candidate_applications (
+  insert into public.candidate_applications as ca (
     company_id,
     job_opening_id,
     interview_kit_id,
@@ -362,9 +362,13 @@ begin
     full_name = excluded.full_name,
     phone = excluded.phone,
     cover_note = excluded.cover_note,
-    candidate_user_id = coalesce(public.candidate_applications.candidate_user_id, auth.uid()),
+    candidate_user_id = coalesce(ca.candidate_user_id, auth.uid()),
     updated_at = now()
-  returning id, interview_kit_id, status into saved_row;
+  returning
+    ca.id,
+    ca.interview_kit_id,
+    ca.status
+  into saved_row;
 
   application_id := saved_row.id;
   interview_kit_id := saved_row.interview_kit_id;

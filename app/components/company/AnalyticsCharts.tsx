@@ -44,7 +44,17 @@ interface AnalyticsChartsProps {
   currentUserRole?: string | null;
 }
 
-const PIE_COLORS = ["hsl(var(--primary))", "hsl(var(--muted-foreground))"];
+const COMPLETION_COLORS = ["hsl(160 84% 39%)", "hsl(38 92% 50%)"];
+const ROLE_BAR_COLORS = [
+  "hsl(217 91% 60%)",
+  "hsl(173 80% 40%)",
+  "hsl(43 96% 56%)",
+  "hsl(330 81% 60%)",
+  "hsl(199 89% 48%)",
+  "hsl(142 71% 45%)",
+  "hsl(24 95% 53%)",
+  "hsl(262 83% 58%)",
+];
 
 const AnalyticsCharts = ({ sessions }: AnalyticsChartsProps) => {
   const stats = useMemo(() => {
@@ -124,7 +134,7 @@ const AnalyticsCharts = ({ sessions }: AnalyticsChartsProps) => {
     overall: { label: "Overall", color: "hsl(var(--primary))" },
     content: { label: "Content", color: "hsl(var(--accent))" },
     style: { label: "Clarity", color: "hsl(var(--muted-foreground))" },
-    count: { label: "Sessions", color: "hsl(var(--primary))" },
+    count: { label: "Sessions", color: ROLE_BAR_COLORS[0] },
   };
 
   const kpiCards = [
@@ -274,7 +284,7 @@ const AnalyticsCharts = ({ sessions }: AnalyticsChartsProps) => {
                     nameKey="name"
                   >
                     {completionData.map((_, i) => (
-                      <Cell key={i} fill={PIE_COLORS[i]} />
+                      <Cell key={i} fill={COMPLETION_COLORS[i]} />
                     ))}
                   </Pie>
                   <ChartTooltip content={<ChartTooltipContent />} />
@@ -289,7 +299,7 @@ const AnalyticsCharts = ({ sessions }: AnalyticsChartsProps) => {
                 >
                   <div
                     className="w-2.5 h-2.5 rounded-full"
-                    style={{ backgroundColor: PIE_COLORS[i] }}
+                    style={{ backgroundColor: COMPLETION_COLORS[i] }}
                   />
                   {d.name} ({d.value})
                 </div>
@@ -335,9 +345,15 @@ const AnalyticsCharts = ({ sessions }: AnalyticsChartsProps) => {
                     <ChartTooltip content={<ChartTooltipContent />} />
                     <Bar
                       dataKey="count"
-                      fill="hsl(var(--primary))"
                       radius={[6, 6, 0, 0]}
-                    />
+                    >
+                      {roleData.map((entry, index) => (
+                        <Cell
+                          key={entry.role}
+                          fill={ROLE_BAR_COLORS[index % ROLE_BAR_COLORS.length]}
+                        />
+                      ))}
+                    </Bar>
                   </BarChart>
                 </ChartContainer>
               ) : (
