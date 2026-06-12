@@ -32,6 +32,7 @@ import {
   isMissingProfileNameColumn,
   isMissingProfileResumeColumn,
 } from "@/lib/profileSchema";
+import { RecordingQuality } from "@/lib/recordingQuality";
 
 const getReadableError = (error: unknown) => {
   if (!error) return null;
@@ -80,6 +81,7 @@ interface CompanySession {
   content_score: number | null;
   style_score: number | null;
   video_url: string | null;
+  recording_quality?: RecordingQuality | null;
   completed_at: string | null;
   created_at: string;
   ai_feedback: SessionFeedback | null;

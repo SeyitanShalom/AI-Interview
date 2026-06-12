@@ -52,6 +52,11 @@ import {
   isMissingProfileResumeColumn,
   isMissingProfileRoleColumn,
 } from "@/lib/profileSchema";
+import {
+  createDefaultRecordingQuality,
+  RecordingQuality,
+  summarizeRecordingQuality,
+} from "@/lib/recordingQuality";
 
 type InterviewStep =
   | "setup"
@@ -88,6 +93,10 @@ interface Session {
   created_at: string;
   ai_feedback: Feedback | null;
   video_url: string | null;
+  recording_quality?: RecordingQuality | null;
+  company_id?: string | null;
+  interview_kit_id?: string | null;
+  candidate_application_id?: string | null;
   completed_at?: string | null;
 }
 
@@ -253,6 +262,64 @@ const formatInterviewQuestionSet = (questions: string[]) => {
     .join("\n\n");
 };
 
+const parseFormattedInterviewQuestionSet = (value: string) => {
+  const matches = Array.from(
+    value
+      .replace(/\r\n/g, "\n")
+      .matchAll(
+        /(?:^|\n)\s*Question\s+\d+\s*:\s*([\s\S]*?)(?=\n\s*Question\s+\d+\s*:|$)/gi,
+      ),
+  );
+
+  return matches
+    .map((match) => match[1]?.replace(/\s+/g, " ").trim() ?? "")
+    .filter(Boolean);
+};
+
+const fetchInterviewKitById = async (interviewKitId: string) => {
+  const response = await fetch(
+    `/api/interview-kits/${encodeURIComponent(interviewKitId)}`,
+  );
+  const payload = (await response.json().catch(() => ({}))) as
+    | (Partial<InterviewKit> & { error?: string; questions?: unknown })
+    | { error?: string };
+
+  if (!response.ok || !("id" in payload) || typeof payload.id !== "string") {
+    throw new Error(
+      "error" in payload && payload.error
+        ? payload.error
+        : "Interview kit could not be loaded.",
+    );
+  }
+
+  const questions = Array.isArray(payload.questions)
+    ? payload.questions
+        .map((question) =>
+          typeof question === "string" ? question.trim() : "",
+        )
+        .filter(Boolean)
+    : [];
+
+  if (questions.length === 0) {
+    throw new Error("This interview kit does not contain any questions.");
+  }
+
+  return {
+    id: payload.id,
+    title:
+      typeof payload.title === "string" && payload.title.trim()
+        ? payload.title.trim()
+        : "Interview Kit",
+    job_role:
+      typeof payload.job_role === "string" && payload.job_role.trim()
+        ? payload.job_role.trim()
+        : "Interview",
+    company_id:
+      typeof payload.company_id === "string" ? payload.company_id : "",
+    questions,
+  } satisfies InterviewKit;
+};
+
 const isMissingSchemaColumnError = (
   error: { code?: string; message?: string } | null,
   columnName: string,
@@ -270,6 +337,24 @@ const isMissingSchemaColumnError = (
     message.includes(`column ${columnName.toLowerCase()} does not exist`)
   );
 };
+
+const qualityBadgeClass = (status?: RecordingQuality["status"] | null) => {
+  if (status === "good") {
+    return "border-primary/30 bg-primary/10 text-primary";
+  }
+
+  if (status === "poor") {
+    return "border-destructive/30 bg-destructive/10 text-destructive";
+  }
+
+  return "border-yellow-400/30 bg-yellow-400/10 text-yellow-500";
+};
+
+const isSessionCompleted = (session: Session) =>
+  session.status === "completed" ||
+  Boolean(session.ai_feedback) ||
+  session.overall_score !== null ||
+  Boolean(session.completed_at);
 
 const insertInterviewSession = async (
   sessionPayload: InterviewSessionInsertPayload,
@@ -420,6 +505,7 @@ const saveSessionFeedback = async ({
   feedback,
   completedAt,
   videoUrl,
+  recordingQuality,
   companyId,
   interviewKitId,
 }: {
@@ -427,6 +513,7 @@ const saveSessionFeedback = async ({
   feedback: Feedback;
   completedAt: string;
   videoUrl?: string | null;
+  recordingQuality?: RecordingQuality | null;
   companyId?: string | null;
   interviewKitId?: string | null;
 }) => {
@@ -438,6 +525,7 @@ const saveSessionFeedback = async ({
     status: "completed",
     completed_at: completedAt,
     ...(videoUrl ? { video_url: videoUrl } : {}),
+    ...(recordingQuality ? { recording_quality: recordingQuality } : {}),
     ...(companyId ? { company_id: companyId } : {}),
     ...(interviewKitId ? { interview_kit_id: interviewKitId } : {}),
   };
@@ -461,6 +549,7 @@ const saveSessionFeedback = async ({
     overall_score: feedback.overall_score,
     status: "completed",
     ...(videoUrl ? { video_url: videoUrl } : {}),
+    ...(recordingQuality ? { recording_quality: recordingQuality } : {}),
   };
 
   return supabase
@@ -517,6 +606,9 @@ const CandidateDashboardView = ({
   const applicationId =
     applicationIdOverride ?? queryApplicationId?.trim() ?? null;
   const recorder = useVideoRecorder();
+  const [recordingQuality, setRecordingQuality] = useState<RecordingQuality>(
+    () => createDefaultRecordingQuality(),
+  );
 
   const [step, setStep] = useState<InterviewStep>("setup");
   const [jobRole, setJobRole] = useState("Software Engineer");
@@ -524,6 +616,8 @@ const CandidateDashboardView = ({
   const [kitLoading, setKitLoading] = useState(false);
   const [kitError, setKitError] = useState<string | null>(null);
   const [activeKitQuestionIndex, setActiveKitQuestionIndex] = useState(0);
+  const [resumedCompanyKitSession, setResumedCompanyKitSession] =
+    useState(false);
   const [currentQuestion, setCurrentQuestion] = useState("");
   const [sessionQuestion, setSessionQuestion] = useState("");
   const [activeQuestionRole, setActiveQuestionRole] = useState("");
@@ -536,6 +630,8 @@ const CandidateDashboardView = ({
   const [targetRoles, setTargetRoles] = useState<string[]>([]);
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
   const [activeTab, setActiveTab] = useState("practice");
+  const [activeCandidateApplicationId, setActiveCandidateApplicationId] =
+    useState<string | null>(applicationId);
   const [answerTranscript, setAnswerTranscript] = useState("");
   const [mediaUnavailableMessage, setMediaUnavailableMessage] = useState<
     string | null
@@ -561,12 +657,19 @@ const CandidateDashboardView = ({
     () => normalizeRoles([...splitRoleInput(jobRole), ...profileRoles]),
     [jobRole, profileRoles],
   );
-  const isCompanyKitInterview = Boolean(companyInterviewMode && linkedKit);
+  const isCompanyKitFlow = companyInterviewMode || resumedCompanyKitSession;
+  const isCompanyKitInterview = Boolean(isCompanyKitFlow && linkedKit);
   const hasMoreKitQuestionsAfterFeedback = Boolean(
     linkedKit &&
     !isCompanyKitInterview &&
     activeKitQuestionIndex < linkedKit.questions.length - 1,
   );
+
+  useEffect(() => {
+    if (!resumedCompanyKitSession) {
+      setActiveCandidateApplicationId(applicationId);
+    }
+  }, [applicationId, resumedCompanyKitSession]);
 
   useEffect(() => {
     if (authLoading || user) return;
@@ -755,6 +858,7 @@ const CandidateDashboardView = ({
       setKitError(null);
       setKitLoading(false);
       setActiveKitQuestionIndex(0);
+      setResumedCompanyKitSession(false);
       return;
     }
 
@@ -763,36 +867,13 @@ const CandidateDashboardView = ({
       setKitError(null);
 
       try {
-        const response = await fetch(
-          `/api/interview-kits/${encodeURIComponent(kitId)}`,
-        );
-        const payload = (await response.json().catch(() => ({}))) as
-          | InterviewKit
-          | { error?: string };
-
-        if (!response.ok || !("id" in payload)) {
-          throw new Error(
-            "error" in payload && payload.error
-              ? payload.error
-              : "Interview kit could not be loaded.",
-          );
-        }
-
-        const questions = Array.isArray(payload.questions)
-          ? payload.questions.filter(
-              (question): question is string =>
-                typeof question === "string" && question.trim().length > 0,
-            )
-          : [];
-
-        if (questions.length === 0) {
-          throw new Error("This interview kit does not contain any questions.");
-        }
+        const kit = await fetchInterviewKitById(kitId);
 
         if (!cancelled) {
-          setLinkedKit({ ...payload, questions });
-          setJobRole(payload.job_role);
+          setLinkedKit(kit);
+          setJobRole(kit.job_role);
           setActiveKitQuestionIndex(0);
+          setResumedCompanyKitSession(false);
         }
       } catch (error) {
         if (!cancelled) {
@@ -824,13 +905,17 @@ const CandidateDashboardView = ({
     async (
       status: "interview_started" | "interview_completed",
       sessionId: string,
+      applicationIdOverride?: string | null,
     ) => {
-      if (!applicationId) return;
+      const targetApplicationId =
+        applicationIdOverride ?? activeCandidateApplicationId ?? applicationId;
+
+      if (!targetApplicationId) return;
 
       const { error } = await supabase.rpc(
         "link_candidate_application_session",
         {
-          application_uuid: applicationId,
+          application_uuid: targetApplicationId,
           session_uuid: sessionId,
           next_status: status,
         },
@@ -840,7 +925,7 @@ const CandidateDashboardView = ({
         console.warn("Candidate application status sync failed.", error);
       }
     },
-    [applicationId],
+    [activeCandidateApplicationId, applicationId],
   );
 
   useEffect(() => {
@@ -1002,7 +1087,7 @@ const CandidateDashboardView = ({
       let questionRole = linkedKit?.job_role || getRandomRole(practiceRolePool);
 
       if (linkedKit) {
-        if (companyInterviewMode) {
+        if (isCompanyKitFlow) {
           const kitQuestions = linkedKit.questions
             .map((question) => question.trim())
             .filter(Boolean);
@@ -1118,7 +1203,12 @@ const CandidateDashboardView = ({
         });
       }
 
-      await syncCandidateApplication("interview_started", session.id);
+      setActiveCandidateApplicationId(applicationId);
+      await syncCandidateApplication(
+        "interview_started",
+        session.id,
+        applicationId,
+      );
 
       setCurrentQuestion(displayQuestion);
       setSessionQuestion(sessionQuestionText);
@@ -1126,6 +1216,7 @@ const CandidateDashboardView = ({
       setCurrentSessionId(session.id);
 
       setAnswerTranscript("");
+      setRecordingQuality(createDefaultRecordingQuality());
       manualTranscriptEditedRef.current = false;
       setMediaUnavailableMessage(null);
       setTranscriptionError(null);
@@ -1155,7 +1246,7 @@ const CandidateDashboardView = ({
     linkedKit,
     applicationId,
     syncCandidateApplication,
-    companyInterviewMode,
+    isCompanyKitFlow,
     activeKitQuestionIndex,
     resumeSummary,
     resumeRoles,
@@ -1195,6 +1286,13 @@ const CandidateDashboardView = ({
     }
 
     setTranscriptionError(null);
+    setRecordingQuality(
+      summarizeRecordingQuality({
+        durationSeconds: 0,
+        cameraAvailable: stream.getVideoTracks().length > 0,
+        microphoneAvailable: stream.getAudioTracks().length > 0,
+      }),
+    );
     const started = recorder.startRecording(stream);
     if (started) {
       startSpeechRecognition();
@@ -1413,9 +1511,9 @@ const CandidateDashboardView = ({
               jobRole: feedbackRole,
               question: feedbackQuestion,
               transcript: transcriptForFeedback,
-              resumeSummary: companyInterviewMode ? null : resumeSummary,
-              resumeRoles: companyInterviewMode ? [] : resumeRoles,
-              targetRoles: companyInterviewMode ? [] : targetRoles,
+              resumeSummary: isCompanyKitFlow ? null : resumeSummary,
+              resumeRoles: isCompanyKitFlow ? [] : resumeRoles,
+              targetRoles: isCompanyKitFlow ? [] : targetRoles,
             },
           },
         );
@@ -1452,12 +1550,17 @@ const CandidateDashboardView = ({
       }
 
       const completedAt = new Date().toISOString();
+      const finalRecordingQuality = summarizeRecordingQuality({
+        ...recordingQuality,
+        durationSeconds: recorder.duration,
+      });
       const { data: completedSession, error: completedSessionError } =
         await saveSessionFeedback({
           sessionId: currentSessionId,
           feedback: nextFeedback,
           completedAt,
           videoUrl: uploadedVideoUrl,
+          recordingQuality: finalRecordingQuality,
           companyId: linkedKit?.company_id ?? null,
           interviewKitId: linkedKit?.id ?? null,
         });
@@ -1483,6 +1586,16 @@ const CandidateDashboardView = ({
           completedSessionRecord.created_at ?? new Date().toISOString(),
         ai_feedback: nextFeedback,
         video_url: completedSessionRecord.video_url ?? uploadedVideoUrl,
+        recording_quality:
+          completedSessionRecord.recording_quality ?? finalRecordingQuality,
+        company_id:
+          completedSessionRecord.company_id ?? linkedKit?.company_id ?? null,
+        interview_kit_id:
+          completedSessionRecord.interview_kit_id ?? (linkedKit?.id || null),
+        candidate_application_id:
+          completedSessionRecord.candidate_application_id ??
+          activeCandidateApplicationId ??
+          null,
         completed_at: completedAt,
       } as Session;
 
@@ -1508,6 +1621,7 @@ const CandidateDashboardView = ({
   const handleRetake = () => {
     recorder.resetRecording();
     setAnswerTranscript("");
+    setRecordingQuality(createDefaultRecordingQuality());
     manualTranscriptEditedRef.current = false;
     setTranscriptionError(null);
 
@@ -1539,11 +1653,19 @@ const CandidateDashboardView = ({
     setActiveQuestionRole("");
     setSelectedSession(null);
     setAnswerTranscript("");
+    setRecordingQuality(createDefaultRecordingQuality());
     manualTranscriptEditedRef.current = false;
     setMediaUnavailableMessage(null);
     setTranscriptionError(null);
-    if (companyInterviewMode) {
+    if (companyInterviewMode || resumedCompanyKitSession) {
       setActiveKitQuestionIndex(0);
+    }
+
+    if (resumedCompanyKitSession && !companyInterviewMode) {
+      setLinkedKit(null);
+      setResumedCompanyKitSession(false);
+      setActiveCandidateApplicationId(applicationId);
+      setActiveTab("history");
     }
   };
 
@@ -1559,6 +1681,7 @@ const CandidateDashboardView = ({
     setSessionQuestion("");
     setSelectedSession(null);
     setAnswerTranscript("");
+    setRecordingQuality(createDefaultRecordingQuality());
     manualTranscriptEditedRef.current = false;
     setMediaUnavailableMessage(null);
     setTranscriptionError(null);
@@ -1586,11 +1709,118 @@ const CandidateDashboardView = ({
     setStep("complete");
   };
 
-  const viewSession = (sessionId: string) => {
+  const viewSession = async (sessionId: string) => {
     const session = sessions.find((s) => s.id === sessionId);
     if (session) {
-      setSelectedSession(session);
       setActiveTab("practice");
+
+      if (isSessionCompleted(session)) {
+        setSelectedSession(session);
+        return;
+      }
+
+      stopSpeechRecognition();
+      recorder.stopCamera();
+      recorder.resetRecording();
+      setSelectedSession(null);
+      setFeedback(null);
+      setCurrentSessionId(session.id);
+      setActiveCandidateApplicationId(
+        session.candidate_application_id ?? applicationId,
+      );
+
+      const parsedQuestions = parseFormattedInterviewQuestionSet(
+        session.question,
+      );
+      let resumedKit: InterviewKit | null = null;
+      let kitLoadMessage: string | null = null;
+
+      if (session.interview_kit_id) {
+        setKitLoading(true);
+        setKitError(null);
+
+        try {
+          const kit = await fetchInterviewKitById(session.interview_kit_id);
+          resumedKit = {
+            ...kit,
+            company_id: kit.company_id || session.company_id || "",
+          };
+        } catch (error) {
+          kitLoadMessage =
+            error instanceof Error
+              ? error.message
+              : "Interview kit could not be loaded.";
+          console.warn("Could not reload interview kit for session resume.", {
+            sessionId: session.id,
+            interviewKitId: session.interview_kit_id,
+            error,
+          });
+        } finally {
+          setKitLoading(false);
+        }
+      }
+
+      const fallbackKit =
+        !resumedKit &&
+        parsedQuestions.length > 0 &&
+        (session.interview_kit_id ||
+          session.company_id ||
+          parsedQuestions.length > 1)
+          ? ({
+              id: session.interview_kit_id ?? "",
+              title: `${session.job_role} Interview Kit`,
+              job_role: session.job_role,
+              company_id: session.company_id ?? "",
+              questions: parsedQuestions,
+            } satisfies InterviewKit)
+          : null;
+      const nextKit = resumedKit ?? fallbackKit;
+      const isCompanySession = Boolean(
+        nextKit &&
+          (session.interview_kit_id ||
+            session.company_id ||
+            parsedQuestions.length > 1),
+      );
+
+      if (nextKit && isCompanySession) {
+        const orderedQuestions = nextKit.questions;
+        setLinkedKit(nextKit);
+        setResumedCompanyKitSession(true);
+        setActiveKitQuestionIndex(0);
+        setCurrentQuestion(orderedQuestions[0]);
+        setSessionQuestion(formatInterviewQuestionSet(orderedQuestions));
+        setActiveQuestionRole(nextKit.job_role);
+        setJobRole(nextKit.job_role);
+        setKitError(null);
+      } else {
+        setLinkedKit(null);
+        setResumedCompanyKitSession(false);
+        setActiveKitQuestionIndex(0);
+        setCurrentQuestion(session.question);
+        setSessionQuestion(session.question);
+        setActiveQuestionRole(session.job_role);
+        setJobRole(session.job_role);
+
+        if (kitLoadMessage) {
+          setKitError(kitLoadMessage);
+          toast.warning("Interview kit order unavailable", {
+            description:
+              "The session was resumed, but the original kit questions could not be reloaded.",
+          });
+        }
+      }
+
+      setAnswerTranscript("");
+      setRecordingQuality(createDefaultRecordingQuality());
+      manualTranscriptEditedRef.current = false;
+      setMediaUnavailableMessage(null);
+      setTranscriptionError(null);
+      setStep("interview");
+      toast.info("Interview resumed", {
+        description: isCompanySession
+          ? "Your original company interview question order has been restored."
+          : "Record your answer again or paste a transcript to finish this session.",
+      });
     }
   };
 
@@ -1634,7 +1864,7 @@ const CandidateDashboardView = ({
 
       <div className="container relative z-10 max-w-5xl px-6 py-10 mx-auto mt-28">
         {/* Past session feedback view */}
-        {!companyInterviewMode && selectedSession && (
+        {!isCompanyKitFlow && selectedSession && (
           <motion.div
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
@@ -1687,6 +1917,35 @@ const CandidateDashboardView = ({
                 </div>
               )}
               <div className="min-w-0">
+                {selectedSession.recording_quality && (
+                  <div className="mb-4 rounded-xl border border-border/40 bg-secondary/20 p-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-medium text-foreground">
+                        Recording quality
+                      </span>
+                      <span
+                        className={`rounded-full border px-2.5 py-1 text-xs font-medium capitalize ${qualityBadgeClass(
+                          selectedSession.recording_quality.status,
+                        )}`}
+                      >
+                        {selectedSession.recording_quality.status}
+                      </span>
+                    </div>
+                    {selectedSession.recording_quality.warnings.length > 0 ? (
+                      <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-muted-foreground">
+                        {selectedSession.recording_quality.warnings.map(
+                          (warning) => (
+                            <li key={warning}>{warning}</li>
+                          ),
+                        )}
+                      </ul>
+                    ) : (
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        No major recording quality issues detected.
+                      </p>
+                    )}
+                  </div>
+                )}
                 {selectedSession.ai_feedback ? (
                   <FeedbackDisplay
                     feedback={
@@ -1719,21 +1978,21 @@ const CandidateDashboardView = ({
                 <h1 className="text-xl font-bold tracking-tight md:text-2xl font-display">
                   {linkedKit
                     ? linkedKit.title
-                    : companyInterviewMode
+                    : isCompanyKitFlow
                       ? "Company Interview"
                       : "Practice Interview"}
                 </h1>
                 <p className="text-xs md:text-sm text-muted-foreground">
                   {linkedKit
-                    ? companyInterviewMode
+                    ? isCompanyKitFlow
                       ? `${linkedKit.job_role} company interview`
                       : `${linkedKit.job_role} interview kit`
-                    : companyInterviewMode
+                    : isCompanyKitFlow
                       ? "Complete your assigned company interview"
                       : "AI-powered mock interviews with real-time feedback"}
                 </p>
               </div>
-              {!companyInterviewMode && (
+              {!isCompanyKitFlow && (
                 <div className="flex flex-col gap-3 lg:items-end">
                   <div className="flex items-center gap-3">
                     <Link href="/candidate/profile">
@@ -1771,7 +2030,7 @@ const CandidateDashboardView = ({
                     exit={{ opacity: 0, y: -20 }}
                   >
                     <div className="grid gap-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:items-start">
-                      {companyInterviewMode ? (
+                      {isCompanyKitFlow ? (
                         <div className="px-4 py-3 text-sm border shadow-sm rounded-2xl border-border/40 bg-secondary/20 text-foreground">
                           <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                             Company interview
@@ -1833,14 +2092,14 @@ const CandidateDashboardView = ({
                             <Bot className="w-10 h-10 text-primary" />
                           </div>
                           <CardTitle className="text-xl font-display">
-                            {companyInterviewMode
+                            {isCompanyKitFlow
                               ? "Start Company Interview"
                               : linkedKit
                                 ? "Start Interview Kit"
                                 : "Start Practice Session"}
                           </CardTitle>
                           <p className="text-sm text-muted-foreground">
-                            {companyInterviewMode
+                            {isCompanyKitFlow
                               ? "Answer the company questions in one video and submit it for review."
                               : linkedKit
                                 ? "Answer this company question on video and get instant feedback."
@@ -1870,7 +2129,7 @@ const CandidateDashboardView = ({
                                     {linkedKit.title}
                                   </p>
                                   <p className="mt-1 text-xs text-muted-foreground">
-                                    {companyInterviewMode
+                                    {isCompanyKitFlow
                                       ? `${linkedKit.questions.length} question${
                                           linkedKit.questions.length !== 1
                                             ? "s"
@@ -1885,7 +2144,7 @@ const CandidateDashboardView = ({
                             </div>
                           )}
 
-                          {!companyInterviewMode && (
+                          {!isCompanyKitFlow && (
                             <div>
                               <label className="block mb-2 text-sm font-medium text-foreground">
                                 Practice Role(s)
@@ -1944,7 +2203,7 @@ const CandidateDashboardView = ({
                               <>
                                 <Sparkles className="w-4 h-4" />{" "}
                                 {linkedKit
-                                  ? companyInterviewMode
+                                  ? isCompanyKitFlow
                                     ? "Start Interview"
                                     : "Start Kit Question"
                                   : "Start Interview"}
@@ -2068,6 +2327,8 @@ const CandidateDashboardView = ({
                       isRecording={recorder.isRecording}
                       recordedUrl={recorder.recordedUrl}
                       duration={recorder.duration}
+                      quality={recordingQuality}
+                      onQualityChange={setRecordingQuality}
                       onStartRecording={handleStartRecording}
                       onStopRecording={handleStopRecording}
                       onRetake={handleRetake}
@@ -2206,7 +2467,7 @@ const CandidateDashboardView = ({
                         onClick={
                           hasMoreKitQuestionsAfterFeedback
                             ? handleNextKitQuestion
-                            : companyInterviewMode
+                            : isCompanyKitFlow
                               ? handleFinishCompanyInterview
                               : resetToSetup
                         }
@@ -2219,7 +2480,7 @@ const CandidateDashboardView = ({
                         ) : (
                           <>
                             <Play className="w-4 h-4" />{" "}
-                            {companyInterviewMode
+                            {isCompanyKitFlow
                               ? "Finish Interview"
                               : "Practice Again"}
                           </>
@@ -2230,7 +2491,7 @@ const CandidateDashboardView = ({
                   </motion.div>
                 )}
 
-                {step === "complete" && companyInterviewMode && (
+                {step === "complete" && isCompanyKitFlow && (
                   <motion.div
                     key="complete"
                     initial={{ opacity: 0, y: 20 }}
@@ -2248,7 +2509,7 @@ const CandidateDashboardView = ({
                         Your responses have been saved for the company to
                         review.
                       </p>
-                      {linkedKit && (
+                      {linkedKit?.id && (
                         <Link
                           href={`/interview/kit/${encodeURIComponent(linkedKit.id)}`}
                         >
@@ -2263,7 +2524,7 @@ const CandidateDashboardView = ({
               </AnimatePresence>
             </TabsContent>
 
-            {!companyInterviewMode && (
+            {!isCompanyKitFlow && (
               <TabsContent value="history">
                 <SessionHistory
                   sessions={sessions}

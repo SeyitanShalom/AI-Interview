@@ -133,7 +133,7 @@ const CandidateAuth = () => {
 
         const target = safeRedirectPath(redirectTo);
         setStatus({ type: "success", message: "Logged in successfully." });
-        window.location.assign(target);
+        window.location.replace(target);
       } else {
         const { data, error } = await supabase.auth.signUp({
           email: email,
@@ -169,7 +169,7 @@ const CandidateAuth = () => {
         if (data.session) {
           const target = safeRedirectPath(redirectTo);
           setStatus({ type: "success", message: "Account created." });
-          window.location.assign(target);
+          window.location.replace(target);
           return;
         }
 
@@ -314,7 +314,7 @@ const CandidateAuth = () => {
 
           <div className="mt-4 text-center">
             <button
-              onClick={() => router.push("/company/auth")}
+              onClick={() => router.replace("/company/auth")}
               className="text-xs transition-colors text-muted-foreground hover:text-foreground"
             >
               Are you a company? Login here →

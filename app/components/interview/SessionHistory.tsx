@@ -5,6 +5,7 @@ import {
   TrendingUp,
   ChevronRight,
   Trash2,
+  RotateCcw,
 } from "lucide-react";
 import { Card, CardContent } from "@/app/components/ui/card";
 import { Button } from "@/app/components/ui/button";
@@ -88,7 +89,8 @@ const SessionHistory = ({
                     Completed
                   </span>
                 ) : (
-                  <span className="text-xs text-yellow-400 bg-yellow-400/10 px-2.5 py-0.5 rounded-full border border-yellow-400/15">
+                  <span className="flex items-center gap-1 text-xs text-yellow-400 bg-yellow-400/10 px-2.5 py-0.5 rounded-full border border-yellow-400/15">
+                    <RotateCcw className="w-3 h-3" />
                     In Progress
                   </span>
                 )}

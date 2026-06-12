@@ -27,6 +27,14 @@ import { useToast } from "@/app/components/hooks/useToast";
 
 type CompanyMode = "login" | "signup" | "join";
 
+function safeRedirectPath(rawPath: string | null) {
+  if (!rawPath || !rawPath.startsWith("/") || rawPath.startsWith("//")) {
+    return "/company/dashboard";
+  }
+
+  return rawPath;
+}
+
 const CompanyAuth = () => {
   const [mode, setMode] = useState<CompanyMode>("login");
   const [email, setEmail] = useState("");
@@ -40,6 +48,7 @@ const CompanyAuth = () => {
     companyName: string | null;
   } | null>(null);
   const [loading, setLoading] = useState(false);
+  const [redirectTo, setRedirectTo] = useState<string | null>(null);
   const router = useRouter();
   const { toast } = useToast();
   const [secureInviteTokenFromQuery, setSecureInviteTokenFromQuery] = useState<
@@ -50,14 +59,16 @@ const CompanyAuth = () => {
       return undefined;
     }
 
-    return `${window.location.origin}/auth/callback?next=/company/dashboard`;
-  }, []);
+    const next = safeRedirectPath(redirectTo);
+    return `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
+  }, [redirectTo]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const secureToken = params.get("secure");
     const invite = params.get("invite");
 
+    setRedirectTo(params.get("redirect"));
     setSecureInviteTokenFromQuery(secureToken);
 
     if (invite) {
@@ -259,7 +270,7 @@ const CompanyAuth = () => {
       }
 
       toast({ title: "Welcome back!", description: "Logged in successfully." });
-      router.push("/company/dashboard");
+      router.replace(safeRedirectPath(redirectTo));
     } catch (error: unknown) {
       toast({
         title: "Error",
@@ -319,7 +330,7 @@ const CompanyAuth = () => {
           title: "Company registered!",
           description: "Welcome to your dashboard.",
         });
-        router.push("/company/dashboard");
+        router.replace(safeRedirectPath(redirectTo));
       } else {
         toast({
           title: "Company registered!",
@@ -693,7 +704,7 @@ const CompanyAuth = () => {
 
           <div className="mt-4 text-center">
             <button
-              onClick={() => router.push("/candidate/auth")}
+              onClick={() => router.replace("/candidate/auth")}
               className="text-xs transition-colors text-muted-foreground hover:text-foreground"
             >
               Are you a candidate? Login here →

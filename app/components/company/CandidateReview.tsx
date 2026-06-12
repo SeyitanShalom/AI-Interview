@@ -31,6 +31,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/app/components/ui/dialog";
+import { RecordingQuality } from "@/lib/recordingQuality";
 import { useToast } from "@/app/components/hooks/useToast";
 
 interface Feedback {
@@ -54,6 +55,7 @@ interface Session {
   content_score?: number | null;
   style_score?: number | null;
   video_url: string | null;
+  recording_quality?: RecordingQuality | null;
   completed_at?: string | null;
   created_at: string;
   ai_feedback: Feedback | null;
@@ -88,6 +90,14 @@ const scoreBg = (score: number) => {
   if (score >= 80) return "bg-primary/10 border-primary/20";
   if (score >= 60) return "bg-yellow-400/10 border-yellow-400/20";
   return "bg-destructive/10 border-destructive/20";
+};
+
+const qualityBadgeClass = (status?: RecordingQuality["status"] | null) => {
+  if (status === "good") return "border-primary/30 bg-primary/10 text-primary";
+  if (status === "poor") {
+    return "border-destructive/30 bg-destructive/10 text-destructive";
+  }
+  return "border-yellow-400/30 bg-yellow-400/10 text-yellow-500";
 };
 
 const CandidateReview = ({
@@ -372,6 +382,7 @@ const CandidateReview = ({
           const candidateProfile = profileByUserId.get(session.user_id);
           const resumeSummary = candidateProfile?.resume_summary?.trim();
           const recordingUrl = session.video_url;
+          const recordingQuality = session.recording_quality;
 
           return (
             <motion.div
@@ -406,6 +417,16 @@ const CandidateReview = ({
                           >
                             {session.status}
                           </Badge>
+                          {recordingQuality && (
+                            <Badge
+                              variant="outline"
+                              className={`text-[10px] font-normal capitalize ${qualityBadgeClass(
+                                recordingQuality.status,
+                              )}`}
+                            >
+                              Quality: {recordingQuality.status}
+                            </Badge>
+                          )}
                         </CardTitle>
                         <CardDescription className="flex items-center gap-1 text-xs">
                           <Clock className="w-3 h-3" />
@@ -503,6 +524,37 @@ const CandidateReview = ({
                         </div>
                       </div>
                     )}
+
+                  {recordingQuality && (
+                    <div className="rounded-lg border border-border/30 bg-secondary/15 p-3">
+                      <div className="flex flex-wrap items-center gap-2 text-xs">
+                        <span className="font-medium text-foreground">
+                          Recording quality
+                        </span>
+                        <span
+                          className={`rounded-full border px-2 py-0.5 capitalize ${qualityBadgeClass(
+                            recordingQuality.status,
+                          )}`}
+                        >
+                          {recordingQuality.status}
+                        </span>
+                        <span className="text-muted-foreground">
+                          {recordingQuality.durationSeconds}s
+                        </span>
+                      </div>
+                      {recordingQuality.warnings.length > 0 ? (
+                        <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-muted-foreground">
+                          {recordingQuality.warnings.map((warning) => (
+                            <li key={warning}>{warning}</li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          No major quality issues detected.
+                        </p>
+                      )}
+                    </div>
+                  )}
 
                   <div className="flex items-center gap-2 pt-2 border-t border-border/20">
                     {recordingUrl && (
