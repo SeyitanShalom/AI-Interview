@@ -44,10 +44,10 @@ interface AnalyticsChartsProps {
   currentUserRole?: string | null;
 }
 
-const COMPLETION_COLORS = ["hsl(160 84% 39%)", "hsl(38 92% 50%)"];
+const COMPLETION_COLORS = ["hsl(183 100% 32%)", "hsl(38 92% 50%)"];
 const ROLE_BAR_COLORS = [
   "hsl(217 91% 60%)",
-  "hsl(173 80% 40%)",
+  "hsl(183 80% 36%)",
   "hsl(43 96% 56%)",
   "hsl(330 81% 60%)",
   "hsl(199 89% 48%)",

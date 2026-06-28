@@ -77,7 +77,7 @@ const ForCandidates = () => {
 
       {/* Hero */}
       <section className="relative pt-32 pb-20 overflow-hidden">
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_hsl(160_84%_39%/0.08)_0%,_transparent_60%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_hsl(183_100%_32%/0.08)_0%,_transparent_60%)]" />
         <div className="absolute top-20 left-1/2 -translate-x-1/2 w-[500px] h-[500px] rounded-full bg-primary/5 blur-[120px]" />
 
         <div className="container relative z-10 px-6 mx-auto text-center">
@@ -233,7 +233,7 @@ const ForCandidates = () => {
           >
             <div className="absolute top-0 right-0 w-80 h-80 bg-primary/8 rounded-full blur-[120px] animate-pulse-glow" />
           <div className="absolute bottom-0 left-0 w-60 h-60 bg-primary-glow/5 rounded-full blur-[100px]" />
-          <div className="absolute inset-0 bg-[radial-gradient(hsl(160_84%_39%/0.04)_1px,transparent_1px)] bg-size-[24px_24px]" />
+          <div className="absolute inset-0 bg-[radial-gradient(hsl(183_100%_32%/0.04)_1px,transparent_1px)] bg-size-[24px_24px]" />
             <div className="relative z-10">
               <Shield className="w-10 h-10 mx-auto mb-4 text-primary" />
               <h2 className="mb-4 text-3xl font-display md:text-4xl">

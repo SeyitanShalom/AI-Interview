@@ -27,7 +27,7 @@ const steps = [
 const HowItWorks = () => {
   return (
     <section className="relative py-28">
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom,hsl(160_84%_39%/0.06)_0%,transparent_55%)]" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom,hsl(183_100%_32%/0.06)_0%,transparent_55%)]" />
       <div className="container relative z-10 px-6 mx-auto">
         <motion.div
           initial={{ opacity: 0, y: 20 }}

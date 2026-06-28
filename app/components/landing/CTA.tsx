@@ -17,7 +17,7 @@ const CTA = () => {
           {/* Decorative elements */}
           <div className="absolute top-0 right-0 w-80 h-80 bg-primary/8 rounded-full blur-[120px] animate-pulse-glow" />
           <div className="absolute bottom-0 left-0 w-60 h-60 bg-primary-glow/5 rounded-full blur-[100px]" />
-          <div className="absolute inset-0 bg-[radial-gradient(hsl(160_84%_39%/0.04)_1px,transparent_1px)] bg-size-[24px_24px]" />
+          <div className="absolute inset-0 bg-[radial-gradient(hsl(183_100%_32%/0.04)_1px,transparent_1px)] bg-size-[24px_24px]" />
 
           <div className="relative z-10">
             <motion.div

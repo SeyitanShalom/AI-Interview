@@ -148,7 +148,7 @@ const Pricing = () => {
 
       {/* Hero */}
       <section className="relative pt-32 pb-16 overflow-hidden">
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,hsl(160_84%_39%/0.08)_0%,transparent_60%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,hsl(183_100%_32%/0.08)_0%,transparent_60%)]" />
         <div className="relative z-10 container mx-auto px-6 text-center">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
