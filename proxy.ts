@@ -3,38 +3,53 @@ import { createServerClient } from "@supabase/ssr";
 
 export async function proxy(request: NextRequest) {
   const response = NextResponse.next({ request: { headers: request.headers } });
-
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => {
-            response.cookies.set(name, value, options);
-          });
-        },
-      },
-    },
-  );
-
-  const { data, error } = await supabase.auth.getUser();
-  const user = error ? null : data.user;
-
   const { pathname } = request.nextUrl;
   const requestedPath = `${pathname}${request.nextUrl.search}`;
   const isCandidateDashboard =
     pathname === "/candidate/dashboard" ||
     pathname.startsWith("/candidate/dashboard/");
   const isCandidateProfile =
-    pathname === "/candidate/profile" || pathname.startsWith("/candidate/profile/");
+    pathname === "/candidate/profile" ||
+    pathname.startsWith("/candidate/profile/");
   const isCandidateArea = isCandidateDashboard || isCandidateProfile;
   const isCompanyDashboard =
     pathname === "/company/dashboard" ||
     pathname.startsWith("/company/dashboard/");
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabaseAnonKey) {
+    const authPath = isCandidateArea ? "/candidate/auth" : "/company/auth";
+    const loginUrl = new URL(authPath, request.url);
+    loginUrl.searchParams.set("redirect", requestedPath);
+    loginUrl.searchParams.set(
+      "error",
+      "Configuration error. Please contact support.",
+    );
+    return NextResponse.redirect(loginUrl);
+  }
+
+  const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
+    cookies: {
+      getAll() {
+        return request.cookies.getAll();
+      },
+      setAll(cookiesToSet) {
+        cookiesToSet.forEach(({ name, value, options }) => {
+          response.cookies.set(name, value, options);
+        });
+      },
+    },
+  });
+
+  let user = null;
+
+  try {
+    const { data, error } = await supabase.auth.getUser();
+    user = error ? null : data.user;
+  } catch (error) {
+    console.warn("Unable to read Supabase auth user in proxy.", error);
+  }
 
   if (!user && (isCandidateArea || isCompanyDashboard)) {
     const authPath = isCandidateArea ? "/candidate/auth" : "/company/auth";
