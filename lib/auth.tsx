@@ -6,12 +6,8 @@ import {
   useState,
   ReactNode,
 } from "react";
-import {
-  User,
-  Session,
-  AuthChangeEvent,
-  RealtimeChannel,
-} from "@supabase/supabase-js";
+import type { Subscription } from "@supabase/auth-js";
+import type { User, Session, AuthChangeEvent } from "@supabase/supabase-js";
 
 interface AuthContextType {
   user: User | null;
@@ -35,37 +31,51 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let subscription: RealtimeChannel | null = null;
+    let isMounted = true;
+    let subscription: Subscription | null = null;
 
-    const initAuth = async () => {
-      const { supabase } = await import("@/lib/supabase");
-      const {
-        data: { subscription: sub },
-      } = supabase.auth.onAuthStateChange(
-        (_event: AuthChangeEvent, session: Session | null) => {
-          setSession(session);
-          setUser(session?.user ?? null);
-          setLoading(false);
-        },
-      );
-      subscription = sub;
-
-      supabase.auth
-        .getSession()
-        .then(({ data }: { data: { session: Session | null } }) => {
-          const { session } = data;
-          setSession(session);
-          setUser(session?.user ?? null);
-          setLoading(false);
-        });
+    const applySession = (nextSession: Session | null) => {
+      if (!isMounted) return;
+      setSession(nextSession);
+      setUser(nextSession?.user ?? null);
+      setLoading(false);
     };
 
-    initAuth();
+    const clearAuthState = () => {
+      applySession(null);
+    };
+
+    const initAuth = async () => {
+      try {
+        const { supabase } = await import("@/lib/supabase");
+        const {
+          data: { subscription: sub },
+        } = supabase.auth.onAuthStateChange(
+          (_event: AuthChangeEvent, nextSession: Session | null) => {
+            applySession(nextSession);
+          },
+        );
+
+        if (!isMounted) {
+          sub.unsubscribe();
+          return;
+        }
+
+        subscription = sub;
+
+        const { data } = await supabase.auth.getSession();
+        applySession(data.session);
+      } catch (error) {
+        console.warn("Unable to initialize Supabase auth session.", error);
+        clearAuthState();
+      }
+    };
+
+    void initAuth();
 
     return () => {
-      if (subscription) {
-        subscription.unsubscribe();
-      }
+      isMounted = false;
+      subscription?.unsubscribe();
     };
   }, []);
 
