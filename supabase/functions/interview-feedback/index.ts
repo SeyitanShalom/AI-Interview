@@ -23,9 +23,18 @@ type RequestBody = {
   jobRole?: string;
   question?: string;
   transcript?: string | null;
+  answers?: Array<{
+    question?: string;
+    transcript?: string | null;
+  }>;
   resumeSummary?: string | null;
   resumeRoles?: string[];
   targetRoles?: string[];
+};
+
+type InterviewAnswer = {
+  question: string;
+  transcript: string;
 };
 
 type DenoLike = {
@@ -132,6 +141,38 @@ function coerceStringList(values: unknown, fallback: string[]) {
   return list.length > 0 ? list : fallback;
 }
 
+function normalizeAnswers(
+  values: unknown,
+  fallbackQuestion: string,
+): InterviewAnswer[] {
+  if (!Array.isArray(values)) return [];
+
+  return values
+    .map((value, index) => {
+      if (!value || typeof value !== "object") return null;
+
+      const maybeAnswer = value as {
+        question?: unknown;
+        transcript?: unknown;
+      };
+
+      const transcript = normalizeText(maybeAnswer.transcript);
+      if (!transcript) return null;
+
+      const question = normalizeText(
+        maybeAnswer.question,
+        index === 0 ? fallbackQuestion : `Question ${index + 1}`,
+      );
+
+      return {
+        question: question || `Question ${index + 1}`,
+        transcript,
+      } satisfies InterviewAnswer;
+    })
+    .filter((value): value is InterviewAnswer => Boolean(value))
+    .slice(0, 20);
+}
+
 function scoreFromTranscript(words: number, hasMetrics: boolean) {
   const content = clampScore(34 + Math.min(words * 0.3, 38) + (hasMetrics ? 8 : 0));
   const structure = clampScore(34 + Math.min(words * 0.26, 36));
@@ -229,10 +270,20 @@ function buildPrompt(
   jobRole: string,
   question: string,
   transcript: string,
+  answers: InterviewAnswer[],
   resumeSummary: string | null,
   resumeRoles: string[],
   targetRoles: string[],
 ) {
+  const answerSections =
+    answers.length > 0
+      ? answers
+          .map(
+            (entry, index) => `Question ${index + 1}: ${entry.question}\nAnswer ${index + 1}: ${entry.transcript}`,
+          )
+          .join("\n\n")
+      : "";
+
   return `
 Evaluate this candidate interview answer and return strict JSON.
 
@@ -251,11 +302,12 @@ ${resumeSummary || "No resume summary provided."}
 Interview question:
 ${question}
 
-Candidate transcript:
-${transcript || "(no transcript provided)"}
+${answerSections ? `Candidate answers by question:\n${answerSections}` : `Candidate transcript:\n${transcript || "(no transcript provided)"}`}
 
 Scoring rules:
 - Score only what the transcript demonstrates.
+- When multiple answers are provided, score each answer independently first, then evaluate the overall pattern across answers.
+- Do not average away a weak answer; call out the specific question or answer that needs improvement.
 - Use resume context only to calibrate role expectations; do not award points for resume claims that are not present in the answer.
 - Penalize vague, generic, off-topic, or very short answers even if the resume context is strong.
 - Reward specific actions, decisions, tradeoffs, role-relevant depth, and measurable outcomes.
@@ -521,6 +573,7 @@ DenoRuntime.serve(async (req: Request) => {
       jobRole = "Software Engineer",
       question,
       transcript = null,
+      answers = [],
       resumeSummary = null,
       resumeRoles = [],
       targetRoles = [],
@@ -536,7 +589,12 @@ DenoRuntime.serve(async (req: Request) => {
     const cleanJobRole = normalizeRole(jobRole) || "Software Engineer";
     const cleanQuestion = normalizeText(question);
     const normalizedTranscript = normalizeText(transcript);
-    const transcriptWordCount = countWords(normalizedTranscript);
+    const normalizedAnswers = normalizeAnswers(answers, cleanQuestion);
+    const combinedAnswerTranscript = normalizedAnswers
+      .map((entry, index) => `Question ${index + 1}: ${entry.question}\nAnswer ${index + 1}: ${entry.transcript}`)
+      .join("\n\n");
+    const feedbackTranscript = combinedAnswerTranscript || normalizedTranscript;
+    const transcriptWordCount = countWords(feedbackTranscript);
     const cleanResumeSummary =
       typeof resumeSummary === "string" && resumeSummary.trim()
         ? resumeSummary.replace(/\s+/g, " ").trim().slice(0, 1600)
@@ -547,7 +605,7 @@ DenoRuntime.serve(async (req: Request) => {
     const fallbackFeedback = buildFallbackFeedback(
       cleanJobRole,
       cleanQuestion,
-      normalizedTranscript,
+      feedbackTranscript,
     );
     let feedback: Feedback = fallbackFeedback;
     let usedFallback = true;
@@ -557,7 +615,8 @@ DenoRuntime.serve(async (req: Request) => {
     const prompt = buildPrompt(
       cleanJobRole,
       cleanQuestion,
-      normalizedTranscript,
+      feedbackTranscript,
+      normalizedAnswers,
       cleanResumeSummary,
       cleanResumeRoles,
       cleanTargetRoles,

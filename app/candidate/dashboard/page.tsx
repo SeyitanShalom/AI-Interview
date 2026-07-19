@@ -31,6 +31,14 @@ import {
   TabsTrigger,
 } from "@/app/components/ui/tabs";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/app/components/ui/dropdown-menu";
+import {
   Play,
   History,
   Loader2,
@@ -41,6 +49,7 @@ import {
   ArrowRight,
   ArrowLeft,
   UserCircle,
+  ListChecks,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useVideoRecorder } from "@/app/components/hooks/useVideoRecorder";
@@ -206,6 +215,14 @@ const countWords = (value: string) =>
   value.trim().split(/\s+/).filter(Boolean).length;
 
 const MIN_EVALUATION_WORDS = 12;
+const MAX_PRACTICE_QUESTION_COUNT = 20;
+const PRACTICE_QUESTION_COUNT_OPTIONS = [1, 2, 3, 4, 5] as const;
+
+const normalizePracticeQuestionCount = (value: number) =>
+  Math.max(1, Math.min(MAX_PRACTICE_QUESTION_COUNT, Math.round(value) || 1));
+
+const getMinimumEvaluationWords = (questionCount: number) =>
+  MIN_EVALUATION_WORDS * Math.max(1, questionCount);
 
 const clampScore = (value: number) =>
   Math.max(0, Math.min(100, Math.round(value)));
@@ -275,6 +292,19 @@ const parseFormattedInterviewQuestionSet = (value: string) => {
     .map((match) => match[1]?.replace(/\s+/g, " ").trim() ?? "")
     .filter(Boolean);
 };
+
+const getPromptQuestionCount = (value: string) => {
+  const parsedQuestions = parseFormattedInterviewQuestionSet(value);
+  return parsedQuestions.length > 0 ? parsedQuestions.length : 1;
+};
+
+const flattenSessionQuestions = (sessions: Session[]) =>
+  sessions.flatMap((session) => {
+    const parsedQuestions = parseFormattedInterviewQuestionSet(
+      session.question,
+    );
+    return parsedQuestions.length > 0 ? parsedQuestions : [session.question];
+  });
 
 const fetchInterviewKitById = async (interviewKitId: string) => {
   const response = await fetch(
@@ -618,6 +648,19 @@ const CandidateDashboardView = ({
   const [activeKitQuestionIndex, setActiveKitQuestionIndex] = useState(0);
   const [resumedCompanyKitSession, setResumedCompanyKitSession] =
     useState(false);
+  const [practiceQuestionCount, setPracticeQuestionCount] = useState(1);
+  const [practiceQuestionCountInput, setPracticeQuestionCountInput] =
+    useState("");
+  const [activePracticeQuestionIndex, setActivePracticeQuestionIndex] =
+    useState(0);
+  const [practiceSeriesActive, setPracticeSeriesActive] = useState(false);
+  const [practiceQuestions, setPracticeQuestions] = useState<string[]>([]);
+  const [practiceAnswerTranscripts, setPracticeAnswerTranscripts] = useState<
+    string[]
+  >([]);
+  const [practiceAnswerRecordings, setPracticeAnswerRecordings] = useState<
+    (Blob | null)[]
+  >([]);
   const [currentQuestion, setCurrentQuestion] = useState("");
   const [sessionQuestion, setSessionQuestion] = useState("");
   const [activeQuestionRole, setActiveQuestionRole] = useState("");
@@ -629,6 +672,8 @@ const CandidateDashboardView = ({
   const [resumeRoles, setResumeRoles] = useState<string[]>([]);
   const [targetRoles, setTargetRoles] = useState<string[]>([]);
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
+  const [selectedSessionVideoVisibility, setSelectedSessionVideoVisibility] =
+    useState("hidden");
   const [activeTab, setActiveTab] = useState("practice");
   const [activeCandidateApplicationId, setActiveCandidateApplicationId] =
     useState<string | null>(applicationId);
@@ -664,12 +709,35 @@ const CandidateDashboardView = ({
     !isCompanyKitInterview &&
     activeKitQuestionIndex < linkedKit.questions.length - 1,
   );
+  const hasMorePracticeQuestionsAfterFeedback = Boolean(
+    !linkedKit &&
+    practiceSeriesActive &&
+    activePracticeQuestionIndex < practiceQuestions.length - 1,
+  );
+  const hasMoreQuestionsAfterFeedback =
+    hasMoreKitQuestionsAfterFeedback || hasMorePracticeQuestionsAfterFeedback;
+  const isPracticeSeriesQuestion = !linkedKit && practiceQuestions.length > 1;
+  const isFinalPracticeQuestion =
+    !isPracticeSeriesQuestion ||
+    activePracticeQuestionIndex >= practiceQuestions.length - 1;
+
+  useEffect(() => {
+    if (practiceQuestionCount > 5) {
+      setPracticeQuestionCountInput(String(practiceQuestionCount));
+    } else {
+      setPracticeQuestionCountInput("");
+    }
+  }, [practiceQuestionCount]);
 
   useEffect(() => {
     if (!resumedCompanyKitSession) {
       setActiveCandidateApplicationId(applicationId);
     }
   }, [applicationId, resumedCompanyKitSession]);
+
+  useEffect(() => {
+    setSelectedSessionVideoVisibility("hidden");
+  }, [selectedSession?.id]);
 
   useEffect(() => {
     if (authLoading || user) return;
@@ -751,22 +819,40 @@ const CandidateDashboardView = ({
     return message;
   }, []);
 
-  const getBackupQuestion = useCallback((rolesOrRole: string | string[]) => {
-    const roles = Array.isArray(rolesOrRole)
-      ? normalizeRoles(rolesOrRole)
-      : splitRoleInput(rolesOrRole);
-    const normalizedRole = getRandomRole(roles);
-    const templates = [
-      "Describe a complex problem you solved as a {role}. What options did you consider and why did you choose your final approach?",
-      "Tell me about a time you had to deliver results as a {role} under a tight deadline. How did you prioritize?",
-      "As a {role}, how would you handle disagreement with a teammate about implementation strategy?",
-      "Share an example of feedback you received while working as a {role}. What changed afterward?",
-      "What is one project where your impact as a {role} was measurable? Walk me through your specific contributions.",
-    ];
-
-    const index = Math.floor(Math.random() * templates.length);
-    return templates[index].replace("{role}", normalizedRole);
-  }, []);
+  const getBackupQuestion = useCallback(
+    (rolesOrRole: string | string[], previousQuestions: string[] = []) => {
+      const roles = Array.isArray(rolesOrRole)
+        ? normalizeRoles(rolesOrRole)
+        : splitRoleInput(rolesOrRole);
+      const normalizedRole = getRandomRole(roles);
+      const templates = [
+        "Describe a complex problem you solved as a {role}. What options did you consider and why did you choose your final approach?",
+        "Tell me about a time you had to deliver results as a {role} under a tight deadline. How did you prioritize?",
+        "As a {role}, how would you handle disagreement with a teammate about implementation strategy?",
+        "Share an example of feedback you received while working as a {role}. What changed afterward?",
+        "What is one project where your impact as a {role} was measurable? Walk me through your specific contributions.",
+        "Walk me through a project where your first solution did not work as a {role}. What did you change?",
+        "Tell me about a time you had to learn a new tool, domain, or process quickly as a {role}. How did you approach it?",
+        "Describe a decision you made as a {role} with incomplete information. What risks did you weigh?",
+        "How would you explain a technical or complex tradeoff to a non-technical stakeholder as a {role}?",
+        "Tell me about a time you improved an existing process, product, or workflow as a {role}. What changed?",
+      ];
+      const previous = new Set(
+        previousQuestions.map((question) => question.trim().toLowerCase()),
+      );
+      const questions = templates.map((template) =>
+        template.replace("{role}", normalizedRole),
+      );
+      const availableQuestions = questions.filter(
+        (question) => !previous.has(question.toLowerCase()),
+      );
+      const candidates =
+        availableQuestions.length > 0 ? availableQuestions : questions;
+      const index = Math.floor(Math.random() * candidates.length);
+      return candidates[index];
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!user || companyInterviewMode) return;
@@ -859,6 +945,9 @@ const CandidateDashboardView = ({
       setKitLoading(false);
       setActiveKitQuestionIndex(0);
       setResumedCompanyKitSession(false);
+      setActivePracticeQuestionIndex(0);
+      setPracticeSeriesActive(false);
+      setPracticeQuestions([]);
       return;
     }
 
@@ -874,6 +963,9 @@ const CandidateDashboardView = ({
           setJobRole(kit.job_role);
           setActiveKitQuestionIndex(0);
           setResumedCompanyKitSession(false);
+          setActivePracticeQuestionIndex(0);
+          setPracticeSeriesActive(false);
+          setPracticeQuestions([]);
         }
       } catch (error) {
         if (!cancelled) {
@@ -1085,6 +1177,7 @@ const CandidateDashboardView = ({
       let sessionQuestionText = "";
       let displayQuestion = "";
       let questionRole = linkedKit?.job_role || getRandomRole(practiceRolePool);
+      let nextPracticeQuestions: string[] = [];
 
       if (linkedKit) {
         if (isCompanyKitFlow) {
@@ -1107,7 +1200,32 @@ const CandidateDashboardView = ({
           throw new Error("This interview kit does not have a valid question.");
         }
       } else {
-        try {
+        const requestedQuestionCount = normalizePracticeQuestionCount(
+          practiceQuestionCount,
+        );
+        if (requestedQuestionCount !== practiceQuestionCount) {
+          setPracticeQuestionCount(requestedQuestionCount);
+        }
+
+        setPracticeAnswerTranscripts([]);
+        setPracticeAnswerRecordings([]);
+
+        if (practiceSeriesActive && practiceQuestions.length > 0) {
+          nextPracticeQuestions = practiceQuestions
+            .map((question) => question.trim())
+            .filter(Boolean);
+          sessionQuestionText = formatInterviewQuestionSet(
+            nextPracticeQuestions,
+          );
+          displayQuestion =
+            nextPracticeQuestions[activePracticeQuestionIndex]?.trim() ||
+            nextPracticeQuestions[0] ||
+            "";
+
+          if (!sessionQuestionText || !displayQuestion) {
+            throw new Error("No interview questions could be prepared.");
+          }
+        } else {
           const rolePool = practiceRolePool.length
             ? practiceRolePool
             : splitRoleInput(jobRole);
@@ -1115,57 +1233,92 @@ const CandidateDashboardView = ({
             rolePool.map((role) => role.trim().toLowerCase()),
           );
           const normalizedJobRole = jobRole.trim().toLowerCase();
-          const previousQuestions = sessions
-            .filter((session) => {
+          const previousQuestions = flattenSessionQuestions(
+            sessions.filter((session) => {
               const sessionRole = session.job_role.trim().toLowerCase();
               if (sessionRole === normalizedJobRole) return true;
 
               return splitRoleInput(session.job_role).some((role) =>
                 roleKeys.has(role.toLowerCase()),
               );
-            })
-            .map((session) => session.question)
+            }),
+          )
             .filter(Boolean)
             .slice(0, 12);
+          const generatedQuestions: string[] = [];
 
-          const { data, error } = await supabase.functions.invoke(
-            "generate-question",
-            {
-              body: {
-                jobRole,
-                rolePool,
-                resumeSummary,
-                resumeRoles,
-                targetRoles,
-                previousQuestions,
-              },
-            },
-          );
+          for (let index = 0; index < requestedQuestionCount; index += 1) {
+            const questionsToAvoid = [
+              ...previousQuestions,
+              ...generatedQuestions,
+            ].slice(-12);
 
-          if (error) throw error;
+            try {
+              const { data, error } = await supabase.functions.invoke(
+                "generate-question",
+                {
+                  body: {
+                    jobRole,
+                    rolePool,
+                    resumeSummary,
+                    resumeRoles,
+                    targetRoles,
+                    previousQuestions: questionsToAvoid,
+                  },
+                },
+              );
 
-          sessionQuestionText =
-            typeof data?.question === "string" ? data.question.trim() : "";
-          displayQuestion = sessionQuestionText;
-          questionRole =
-            typeof data?.focusRole === "string" && data.focusRole.trim()
-              ? data.focusRole.trim()
-              : questionRole;
+              if (error) throw error;
 
-          if (!sessionQuestionText) {
-            throw new Error("No interview question returned from AI provider");
+              const generatedQuestion =
+                typeof data?.question === "string" ? data.question.trim() : "";
+
+              if (!generatedQuestion) {
+                throw new Error(
+                  "No interview question returned from AI provider",
+                );
+              }
+
+              if (
+                !generatedQuestions.some(
+                  (question) =>
+                    question.toLowerCase() === generatedQuestion.toLowerCase(),
+                )
+              ) {
+                generatedQuestions.push(generatedQuestion);
+              } else {
+                generatedQuestions.push(
+                  getBackupQuestion(rolePool, questionsToAvoid),
+                );
+              }
+
+              questionRole =
+                typeof data?.focusRole === "string" && data.focusRole.trim()
+                  ? data.focusRole.trim()
+                  : questionRole;
+            } catch (e: unknown) {
+              console.warn(
+                "AI question generation failed; using backup question.",
+                e,
+              );
+              questionRole = getRandomRole(rolePool);
+              generatedQuestions.push(
+                getBackupQuestion(rolePool, questionsToAvoid),
+              );
+            }
           }
-        } catch (e: unknown) {
-          console.warn(
-            "AI question generation failed; using backup question.",
-            e,
+
+          nextPracticeQuestions = generatedQuestions
+            .map((question) => question.trim())
+            .filter(Boolean);
+          sessionQuestionText = formatInterviewQuestionSet(
+            nextPracticeQuestions,
           );
-          const fallbackRoles = practiceRolePool.length
-            ? practiceRolePool
-            : splitRoleInput(jobRole);
-          questionRole = getRandomRole(fallbackRoles);
-          sessionQuestionText = getBackupQuestion([questionRole]);
-          displayQuestion = sessionQuestionText;
+          displayQuestion = nextPracticeQuestions[0] || "";
+
+          if (!sessionQuestionText || !displayQuestion) {
+            throw new Error("No interview questions could be prepared.");
+          }
         }
       }
 
@@ -1210,6 +1363,14 @@ const CandidateDashboardView = ({
         applicationId,
       );
 
+      if (!linkedKit) {
+        setPracticeQuestions(nextPracticeQuestions);
+        setActivePracticeQuestionIndex(0);
+        setPracticeSeriesActive(nextPracticeQuestions.length > 1);
+        setPracticeAnswerTranscripts([]);
+        setPracticeAnswerRecordings([]);
+      }
+
       setCurrentQuestion(displayQuestion);
       setSessionQuestion(sessionQuestionText);
       setActiveQuestionRole(questionRole);
@@ -1248,11 +1409,15 @@ const CandidateDashboardView = ({
     syncCandidateApplication,
     isCompanyKitFlow,
     activeKitQuestionIndex,
+    practiceQuestionCount,
     resumeSummary,
     resumeRoles,
     targetRoles,
     practiceRolePool,
     sessions,
+    practiceSeriesActive,
+    practiceQuestions,
+    activePracticeQuestionIndex,
   ]);
 
   const handleStartRecording = async () => {
@@ -1402,6 +1567,16 @@ const CandidateDashboardView = ({
     try {
       let transcriptForFeedback = "";
       const feedbackQuestion = sessionQuestion || currentQuestion;
+      const feedbackQuestionCount = getPromptQuestionCount(feedbackQuestion);
+      const isPracticeSeriesQuestion =
+        !linkedKit && practiceQuestions.length > 1;
+      const isFinalPracticeQuestion =
+        !isPracticeSeriesQuestion ||
+        activePracticeQuestionIndex >= practiceQuestions.length - 1;
+      const minEvaluationWords =
+        isPracticeSeriesQuestion && !isFinalPracticeQuestion
+          ? MIN_EVALUATION_WORDS
+          : getMinimumEvaluationWords(feedbackQuestionCount);
 
       if (recorder.recordedBlob) {
         setIsTranscribing(true);
@@ -1466,16 +1641,112 @@ const CandidateDashboardView = ({
       }
 
       const transcriptWordCount = countWords(transcriptForFeedback);
-      if (transcriptWordCount < MIN_EVALUATION_WORDS) {
+      if (transcriptWordCount < minEvaluationWords) {
         const message =
           transcriptWordCount > 0
             ? `Only ${transcriptWordCount} words were captured. Record a fuller answer or edit the transcript before submitting.`
             : "No speech was captured. Record your answer again or enter the transcript manually.";
         setTranscriptionError(message);
         toast.error("Not enough speech to evaluate", {
-          description: `At least ${MIN_EVALUATION_WORDS} transcript words are needed for accurate feedback.`,
+          description:
+            isPracticeSeriesQuestion && !isFinalPracticeQuestion
+              ? `At least ${minEvaluationWords} transcript words are needed for this answer before moving to the next question.`
+              : `At least ${minEvaluationWords} transcript words are needed for ${feedbackQuestionCount} question${
+                  feedbackQuestionCount !== 1 ? "s" : ""
+                }.`,
         });
         return;
+      }
+
+      if (isPracticeSeriesQuestion && !isFinalPracticeQuestion) {
+        const nextPracticeTranscripts = [...practiceAnswerTranscripts];
+        nextPracticeTranscripts[activePracticeQuestionIndex] =
+          transcriptForFeedback;
+        setPracticeAnswerTranscripts(nextPracticeTranscripts);
+
+        const nextPracticeQuestionIndex = activePracticeQuestionIndex + 1;
+        recorder.resetRecording();
+        setRecordingQuality(createDefaultRecordingQuality());
+        setAnswerTranscript("");
+        manualTranscriptEditedRef.current = false;
+        setMediaUnavailableMessage(null);
+        setTranscriptionError(null);
+        setActivePracticeQuestionIndex(nextPracticeQuestionIndex);
+        setCurrentQuestion(practiceQuestions[nextPracticeQuestionIndex]);
+        toast.success("Answer saved", {
+          description: `Question ${nextPracticeQuestionIndex + 1} is ready.`,
+        });
+        return;
+      }
+
+      let finalTranscriptForFeedback = transcriptForFeedback;
+      let structuredAnswers:
+        | Array<{
+            question: string;
+            transcript: string;
+          }>
+        | null = null;
+
+      if (isPracticeSeriesQuestion) {
+        const combinedPracticeTranscripts = [...practiceAnswerTranscripts];
+        const combinedPracticeRecordings = [...practiceAnswerRecordings];
+
+        combinedPracticeTranscripts[activePracticeQuestionIndex] =
+          transcriptForFeedback;
+        combinedPracticeRecordings[activePracticeQuestionIndex] =
+          recorder.recordedBlob ??
+          combinedPracticeRecordings[activePracticeQuestionIndex] ??
+          null;
+
+        const practiceTranscriptParts: string[] = [];
+
+        for (let index = 0; index < practiceQuestions.length; index += 1) {
+          const savedTranscript = combinedPracticeTranscripts[index]?.trim();
+          if (savedTranscript) {
+            practiceTranscriptParts.push(
+              `Question ${index + 1}: ${savedTranscript}`,
+            );
+            continue;
+          }
+
+          const savedRecording = combinedPracticeRecordings[index];
+          if (!savedRecording) continue;
+
+          try {
+            setIsTranscribing(true);
+            const localResult =
+              await transcribeWithLocalWhisper(savedRecording);
+            const generatedTranscript = localResult.text.trim();
+            if (generatedTranscript) {
+              combinedPracticeTranscripts[index] = generatedTranscript;
+              practiceTranscriptParts.push(
+                `Question ${index + 1}: ${generatedTranscript}`,
+              );
+            }
+          } catch (transcriptionError) {
+            console.warn("Practice recording transcription failed:", {
+              index,
+              transcriptionError,
+            });
+          } finally {
+            setIsTranscribing(false);
+          }
+        }
+
+        finalTranscriptForFeedback = practiceTranscriptParts.join("\n\n");
+        setPracticeAnswerTranscripts(combinedPracticeTranscripts);
+        setPracticeAnswerRecordings(combinedPracticeRecordings);
+        structuredAnswers = practiceQuestions.map((question, index) => ({
+          question,
+          transcript: combinedPracticeTranscripts[index]?.trim() || "",
+        }));
+      } else {
+        structuredAnswers = [
+          {
+            question: feedbackQuestion,
+            transcript: transcriptForFeedback,
+          },
+        ];
       }
 
       setStep("analyzing");
@@ -1510,7 +1781,8 @@ const CandidateDashboardView = ({
               sessionId: currentSessionId,
               jobRole: feedbackRole,
               question: feedbackQuestion,
-              transcript: transcriptForFeedback,
+              transcript: finalTranscriptForFeedback,
+              answers: structuredAnswers,
               resumeSummary: isCompanyKitFlow ? null : resumeSummary,
               resumeRoles: isCompanyKitFlow ? [] : resumeRoles,
               targetRoles: isCompanyKitFlow ? [] : targetRoles,
@@ -1533,7 +1805,7 @@ const CandidateDashboardView = ({
         nextFeedback = buildFallbackFeedback(
           feedbackRole,
           feedbackQuestion,
-          transcriptForFeedback,
+          finalTranscriptForFeedback,
         );
         usedFallbackFeedback = true;
       }
@@ -1605,6 +1877,7 @@ const CandidateDashboardView = ({
           (session) => session.id !== currentSessionId,
         ),
       ]);
+      setPracticeSeriesActive(false);
       setFeedback(nextFeedback);
       setStep("feedback");
     } catch (e: unknown) {
@@ -1624,10 +1897,15 @@ const CandidateDashboardView = ({
     setRecordingQuality(createDefaultRecordingQuality());
     manualTranscriptEditedRef.current = false;
     setTranscriptionError(null);
+    setPracticeAnswerTranscripts([]);
+    setPracticeAnswerRecordings([]);
 
     if (isCompanyKitInterview && linkedKit?.questions[0]) {
       setActiveKitQuestionIndex(0);
       setCurrentQuestion(linkedKit.questions[0]);
+    } else if (practiceQuestions[0]) {
+      setActivePracticeQuestionIndex(0);
+      setCurrentQuestion(practiceQuestions[0]);
     }
   };
 
@@ -1657,6 +1935,11 @@ const CandidateDashboardView = ({
     manualTranscriptEditedRef.current = false;
     setMediaUnavailableMessage(null);
     setTranscriptionError(null);
+    setActivePracticeQuestionIndex(0);
+    setPracticeSeriesActive(false);
+    setPracticeQuestions([]);
+    setPracticeAnswerTranscripts([]);
+    setPracticeAnswerRecordings([]);
     if (companyInterviewMode || resumedCompanyKitSession) {
       setActiveKitQuestionIndex(0);
     }
@@ -1689,6 +1972,42 @@ const CandidateDashboardView = ({
       Math.min(index + 1, linkedKit.questions.length - 1),
     );
     setStep("setup");
+  };
+
+  const handleAdvancePracticeQuestion = async () => {
+    if (!isPracticeSeriesQuestion || isFinalPracticeQuestion) return;
+
+    if (!recorder.recordedBlob && !answerTranscript.trim()) {
+      setTranscriptionError(
+        "Record the answer before moving to the next question.",
+      );
+      toast.error("Answer needed", {
+        description: "Please record this answer before moving on.",
+      });
+      return;
+    }
+
+    const nextPracticeTranscripts = [...practiceAnswerTranscripts];
+    nextPracticeTranscripts[activePracticeQuestionIndex] =
+      answerTranscript.trim();
+    setPracticeAnswerTranscripts(nextPracticeTranscripts);
+
+    const nextPracticeRecordings = [...practiceAnswerRecordings];
+    nextPracticeRecordings[activePracticeQuestionIndex] = recorder.recordedBlob;
+    setPracticeAnswerRecordings(nextPracticeRecordings);
+
+    const nextPracticeQuestionIndex = activePracticeQuestionIndex + 1;
+    recorder.resetRecording();
+    setRecordingQuality(createDefaultRecordingQuality());
+    setAnswerTranscript("");
+    manualTranscriptEditedRef.current = false;
+    setMediaUnavailableMessage(null);
+    setTranscriptionError(null);
+    setActivePracticeQuestionIndex(nextPracticeQuestionIndex);
+    setCurrentQuestion(practiceQuestions[nextPracticeQuestionIndex]);
+    toast.success("Answer saved", {
+      description: `Question ${nextPracticeQuestionIndex + 1} is ready.`,
+    });
   };
 
   const handleFinishCompanyInterview = () => {
@@ -1728,6 +2047,9 @@ const CandidateDashboardView = ({
       setActiveCandidateApplicationId(
         session.candidate_application_id ?? applicationId,
       );
+      setActivePracticeQuestionIndex(0);
+      setPracticeSeriesActive(false);
+      setPracticeQuestions([]);
 
       const parsedQuestions = parseFormattedInterviewQuestionSet(
         session.question,
@@ -1763,9 +2085,7 @@ const CandidateDashboardView = ({
       const fallbackKit =
         !resumedKit &&
         parsedQuestions.length > 0 &&
-        (session.interview_kit_id ||
-          session.company_id ||
-          parsedQuestions.length > 1)
+        (session.interview_kit_id || session.company_id)
           ? ({
               id: session.interview_kit_id ?? "",
               title: `${session.job_role} Interview Kit`,
@@ -1776,10 +2096,7 @@ const CandidateDashboardView = ({
           : null;
       const nextKit = resumedKit ?? fallbackKit;
       const isCompanySession = Boolean(
-        nextKit &&
-          (session.interview_kit_id ||
-            session.company_id ||
-            parsedQuestions.length > 1),
+        nextKit && (session.interview_kit_id || session.company_id),
       );
 
       if (nextKit && isCompanySession) {
@@ -1793,13 +2110,22 @@ const CandidateDashboardView = ({
         setJobRole(nextKit.job_role);
         setKitError(null);
       } else {
+        const practiceSessionQuestions =
+          parsedQuestions.length > 0 ? parsedQuestions : [session.question];
+
         setLinkedKit(null);
         setResumedCompanyKitSession(false);
         setActiveKitQuestionIndex(0);
-        setCurrentQuestion(session.question);
-        setSessionQuestion(session.question);
+        setPracticeQuestions(practiceSessionQuestions);
+        setPracticeQuestionCount(practiceSessionQuestions.length);
+        setPracticeSeriesActive(practiceSessionQuestions.length > 1);
+        setCurrentQuestion(practiceSessionQuestions[0]);
+        setSessionQuestion(
+          formatInterviewQuestionSet(practiceSessionQuestions),
+        );
         setActiveQuestionRole(session.job_role);
         setJobRole(session.job_role);
+        setPracticeAnswerTranscripts([]);
 
         if (kitLoadMessage) {
           setKitError(kitLoadMessage);
@@ -1815,6 +2141,7 @@ const CandidateDashboardView = ({
       manualTranscriptEditedRef.current = false;
       setMediaUnavailableMessage(null);
       setTranscriptionError(null);
+      setPracticeAnswerTranscripts([]);
       setStep("interview");
       toast.info("Interview resumed", {
         description: isCompanySession
@@ -1894,19 +2221,41 @@ const CandidateDashboardView = ({
                 Delete
               </Button>
             </div>
+            {selectedSession.video_url && (
+              <div className="flex justify-end mb-4">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="gap-2">
+                      Camera video: {selectedSessionVideoVisibility === "visible" ? "Shown" : "Hidden"}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56">
+                    <DropdownMenuLabel>Display camera video</DropdownMenuLabel>
+                    <DropdownMenuRadioGroup
+                      value={selectedSessionVideoVisibility}
+                      onValueChange={setSelectedSessionVideoVisibility}
+                    >
+                      <DropdownMenuRadioItem value="hidden">
+                        Hidden
+                      </DropdownMenuRadioItem>
+                      <DropdownMenuRadioItem value="visible">
+                        Show camera video
+                      </DropdownMenuRadioItem>
+                    </DropdownMenuRadioGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            )}
             <div
               className={
-                selectedSession.video_url
+                selectedSession.video_url && selectedSessionVideoVisibility === "visible"
                   ? "grid gap-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:items-start"
                   : "space-y-6"
               }
             >
-              {selectedSession.video_url && (
+              {selectedSession.video_url && selectedSessionVideoVisibility === "visible" && (
                 <div className="overflow-hidden bg-black rounded-2xl aspect-video ring-1 ring-border/30 lg:sticky lg:top-24">
-                  <video
-                    controls
-                    className="object-cover w-full h-full"
-                  >
+                  <video controls className="object-cover w-full h-full">
                     <source
                       src={`/api/candidate/recording/${encodeURIComponent(
                         selectedSession.id,
@@ -1918,7 +2267,7 @@ const CandidateDashboardView = ({
               )}
               <div className="min-w-0">
                 {selectedSession.recording_quality && (
-                  <div className="mb-4 rounded-xl border border-border/40 bg-secondary/20 p-4">
+                  <div className="p-4 mb-4 border rounded-xl border-border/40 bg-secondary/20">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-sm font-medium text-foreground">
                         Recording quality
@@ -1932,7 +2281,7 @@ const CandidateDashboardView = ({
                       </span>
                     </div>
                     {selectedSession.recording_quality.warnings.length > 0 ? (
-                      <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-muted-foreground">
+                      <ul className="pl-4 mt-2 space-y-1 text-xs list-disc text-muted-foreground">
                         {selectedSession.recording_quality.warnings.map(
                           (warning) => (
                             <li key={warning}>{warning}</li>
@@ -2070,8 +2419,11 @@ const CandidateDashboardView = ({
                                   key={role}
                                   type="button"
                                   onClick={() => {
-                                    if (!linkedKit) setJobRole(role);
+                                    if (!linkedKit && !practiceSeriesActive) {
+                                      setJobRole(role);
+                                    }
                                   }}
+                                  disabled={practiceSeriesActive}
                                   className="px-2 py-1 text-xs border rounded-md border-border/50 bg-background/50 text-muted-foreground hover:text-foreground"
                                 >
                                   {role}
@@ -2096,14 +2448,21 @@ const CandidateDashboardView = ({
                               ? "Start Company Interview"
                               : linkedKit
                                 ? "Start Interview Kit"
-                                : "Start Practice Session"}
+                                : practiceSeriesActive
+                                  ? "Continue Practice Set"
+                                  : "Start Practice Session"}
                           </CardTitle>
                           <p className="text-sm text-muted-foreground">
                             {isCompanyKitFlow
                               ? "Answer the company questions in one video and submit it for review."
                               : linkedKit
                                 ? "Answer this company question on video and get instant feedback."
-                                : "Our AI interviewer will ask you a question. Record your answer and get instant feedback."}
+                                : practiceSeriesActive &&
+                                    practiceQuestionCount > 1
+                                  ? `Question ${
+                                      activePracticeQuestionIndex + 1
+                                    } of ${practiceQuestionCount} is ready.`
+                                  : "Our AI interviewer will ask you a question. Record your answer and get instant feedback."}
                           </p>
                         </CardHeader>
                         <CardContent className="space-y-4">
@@ -2153,7 +2512,7 @@ const CandidateDashboardView = ({
                                 value={jobRole}
                                 onChange={(e) => setJobRole(e.target.value)}
                                 placeholder="e.g. Software Engineer, Product Manager"
-                                disabled={!!linkedKit}
+                                disabled={!!linkedKit || practiceSeriesActive}
                                 className="bg-secondary/50 border-border/50 focus:border-primary/50 focus:ring-primary/20"
                               />
                               {!linkedKit && practiceRolePool.length > 0 && (
@@ -2168,7 +2527,12 @@ const CandidateDashboardView = ({
                                     <button
                                       key={role}
                                       type="button"
-                                      onClick={() => setJobRole(role)}
+                                      onClick={() => {
+                                        if (!practiceSeriesActive) {
+                                          setJobRole(role);
+                                        }
+                                      }}
+                                      disabled={practiceSeriesActive}
                                       className={`px-2 py-1 text-xs border rounded-md transition-colors ${
                                         jobRole.trim().toLowerCase() ===
                                         role.toLowerCase()
@@ -2181,6 +2545,99 @@ const CandidateDashboardView = ({
                                   ))}
                                 </div>
                               )}
+                            </div>
+                          )}
+                          {!linkedKit && (
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between gap-3">
+                                <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                                  <ListChecks className="w-4 h-4 text-primary" />
+                                  Questions to answer
+                                </label>
+                                {practiceSeriesActive &&
+                                  practiceQuestionCount > 1 && (
+                                    <span className="text-xs text-muted-foreground">
+                                      Question {activePracticeQuestionIndex + 1}{" "}
+                                      of {practiceQuestionCount}
+                                    </span>
+                                  )}
+                              </div>
+                              <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                                {PRACTICE_QUESTION_COUNT_OPTIONS.map(
+                                  (count) => {
+                                    const isSelected =
+                                      practiceQuestionCount === count;
+
+                                    return (
+                                      <button
+                                        key={count}
+                                        type="button"
+                                        aria-pressed={isSelected}
+                                        disabled={practiceSeriesActive}
+                                        onClick={() => {
+                                          setPracticeQuestionCount(count);
+                                          setPracticeSeriesActive(false);
+                                          setPracticeQuestionCountInput("");
+                                        }}
+                                        className={`min-h-10 rounded-lg border px-2 text-sm font-medium transition-colors ${
+                                          isSelected
+                                            ? "border-primary/60 bg-primary/10 text-primary"
+                                            : "border-border/50 bg-secondary/30 text-muted-foreground hover:text-foreground"
+                                        } disabled:pointer-events-none disabled:opacity-70`}
+                                      >
+                                        {count}
+                                      </button>
+                                    );
+                                  },
+                                )}
+                              </div>
+                              <div className="pt-1 space-y-2">
+                                <label className="block text-xs font-medium text-muted-foreground">
+                                  Custom count above 5
+                                </label>
+                                <Input
+                                  type="number"
+                                  min={6}
+                                  max={MAX_PRACTICE_QUESTION_COUNT}
+                                  step={1}
+                                  value={practiceQuestionCountInput}
+                                  onChange={(event) => {
+                                    const nextValue = event.target.value;
+                                    setPracticeQuestionCountInput(nextValue);
+
+                                    const parsedValue = Number(nextValue);
+                                    if (
+                                      Number.isInteger(parsedValue) &&
+                                      parsedValue >= 6
+                                    ) {
+                                      setPracticeQuestionCount(
+                                        normalizePracticeQuestionCount(
+                                          parsedValue,
+                                        ),
+                                      );
+                                    }
+                                  }}
+                                  onBlur={() => {
+                                    if (!practiceQuestionCountInput.trim()) {
+                                      return;
+                                    }
+
+                                    const normalizedValue =
+                                      normalizePracticeQuestionCount(
+                                        Number(practiceQuestionCountInput),
+                                      );
+                                    setPracticeQuestionCount(normalizedValue);
+                                    setPracticeQuestionCountInput(
+                                      normalizedValue > 5
+                                        ? String(normalizedValue)
+                                        : "",
+                                    );
+                                  }}
+                                  placeholder="6 - 20"
+                                  disabled={practiceSeriesActive}
+                                  className="bg-secondary/50 border-border/50 focus:border-primary/50 focus:ring-primary/20"
+                                />
+                              </div>
                             </div>
                           )}
                           <Button
@@ -2206,7 +2663,14 @@ const CandidateDashboardView = ({
                                   ? isCompanyKitFlow
                                     ? "Start Interview"
                                     : "Start Kit Question"
-                                  : "Start Interview"}
+                                  : practiceSeriesActive &&
+                                      practiceQuestionCount > 1
+                                    ? `Start Question ${
+                                        activePracticeQuestionIndex + 1
+                                      }`
+                                    : practiceQuestionCount > 1
+                                      ? "Start Practice Set"
+                                      : "Start Interview"}
                               </>
                             )}
                           </Button>
@@ -2224,7 +2688,15 @@ const CandidateDashboardView = ({
                     exit={{ opacity: 0, y: -20 }}
                     className="space-y-6"
                   >
-                    <div className="flex justify-center">
+                    <div className="flex flex-wrap justify-center gap-2">
+                      {!linkedKit &&
+                        practiceSeriesActive &&
+                        practiceQuestionCount > 1 && (
+                          <span className="px-3 py-1 text-xs border rounded-full border-primary/30 bg-primary/10 text-primary">
+                            Question {activePracticeQuestionIndex + 1} of{" "}
+                            {practiceQuestionCount}
+                          </span>
+                        )}
                       <span className="px-3 py-1 text-xs border rounded-full border-border/50 bg-secondary/40 text-muted-foreground">
                         {mediaUnavailableMessage
                           ? "Response: Text transcript"
@@ -2241,6 +2713,32 @@ const CandidateDashboardView = ({
                         !recorder.isRecording && !recorder.recordedUrl
                       }
                     />
+
+                    {!linkedKit && isPracticeSeriesQuestion && (
+                      <div className="flex flex-col max-w-3xl gap-3 px-4 py-3 mx-auto border rounded-xl border-border/50 bg-secondary/20 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="space-y-1">
+                          <span className="text-sm font-medium text-foreground">
+                            Question {activePracticeQuestionIndex + 1} of{" "}
+                            {practiceQuestions.length}
+                          </span>
+                          <p className="text-xs text-muted-foreground">
+                            Record your answer, then move to the next question
+                            before requesting feedback.
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          onClick={handleAdvancePracticeQuestion}
+                          disabled={
+                            isFinalPracticeQuestion || isSubmittingAnswer
+                          }
+                          className="gap-2 bg-linear-to-r from-primary to-primary-glow hover:opacity-90 sm:self-start"
+                        >
+                          <ArrowRight className="w-4 h-4" />
+                          Next Question
+                        </Button>
+                      </div>
+                    )}
 
                     {isCompanyKitInterview &&
                       linkedKit &&
@@ -2397,6 +2895,33 @@ const CandidateDashboardView = ({
                         Cancel
                       </Button>
                       {!recorder.isRecording &&
+                        isPracticeSeriesQuestion &&
+                        !isFinalPracticeQuestion &&
+                        (recorder.recordedUrl ||
+                          ((mediaUnavailableMessage ||
+                            transcriptionError ||
+                            manualTranscriptEditedRef.current) &&
+                            answerTranscript.trim())) && (
+                          <Button
+                            onClick={handleAdvancePracticeQuestion}
+                            disabled={isSubmittingAnswer}
+                            className="gap-2 bg-linear-to-r from-primary to-primary-glow hover:opacity-90 shadow-[0_0_20px_-4px_hsl(var(--primary)/0.4)]"
+                          >
+                            {isSubmittingAnswer ? (
+                              <>
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                                Saving...
+                              </>
+                            ) : (
+                              <>
+                                <ArrowRight className="w-4 h-4" /> Next Question
+                              </>
+                            )}
+                          </Button>
+                        )}
+                      {!recorder.isRecording &&
+                        (!isPracticeSeriesQuestion ||
+                          isFinalPracticeQuestion) &&
                         (recorder.recordedUrl ||
                           ((mediaUnavailableMessage ||
                             transcriptionError ||
@@ -2412,7 +2937,12 @@ const CandidateDashboardView = ({
                                 <Loader2 className="w-4 h-4 animate-spin" />
                                 {isTranscribing
                                   ? "Transcribing..."
-                                  : "Submitting..."}
+                                  : !linkedKit &&
+                                      practiceQuestions.length > 1 &&
+                                      activePracticeQuestionIndex <
+                                        practiceQuestions.length - 1
+                                    ? "Saving..."
+                                    : "Submitting..."}
                               </>
                             ) : (
                               <>
@@ -2467,13 +2997,41 @@ const CandidateDashboardView = ({
                         onClick={
                           hasMoreKitQuestionsAfterFeedback
                             ? handleNextKitQuestion
-                            : isCompanyKitFlow
-                              ? handleFinishCompanyInterview
-                              : resetToSetup
+                            : hasMorePracticeQuestionsAfterFeedback
+                              ? () => {
+                                  if (practiceQuestions.length === 0) return;
+
+                                  stopSpeechRecognition();
+                                  recorder.stopCamera();
+                                  recorder.resetRecording();
+                                  setFeedback(null);
+                                  setCurrentSessionId(null);
+                                  setCurrentQuestion("");
+                                  setSessionQuestion("");
+                                  setSelectedSession(null);
+                                  setAnswerTranscript("");
+                                  setRecordingQuality(
+                                    createDefaultRecordingQuality(),
+                                  );
+                                  manualTranscriptEditedRef.current = false;
+                                  setMediaUnavailableMessage(null);
+                                  setTranscriptionError(null);
+                                  setPracticeSeriesActive(true);
+                                  setActivePracticeQuestionIndex((index) =>
+                                    Math.min(
+                                      index + 1,
+                                      practiceQuestions.length - 1,
+                                    ),
+                                  );
+                                  setStep("setup");
+                                }
+                              : isCompanyKitFlow
+                                ? handleFinishCompanyInterview
+                                : resetToSetup
                         }
                         className="gap-2 bg-linear-to-r from-primary to-primary-glow hover:opacity-90"
                       >
-                        {hasMoreKitQuestionsAfterFeedback ? (
+                        {hasMoreQuestionsAfterFeedback ? (
                           <>
                             <ArrowRight className="w-4 h-4" /> Next Question
                           </>
